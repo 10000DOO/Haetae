@@ -14,7 +14,8 @@ let package = Package(
         .target(name: "HaetaeShared"),
         .target(name: "HaetaeChecks", dependencies: ["HaetaeShared"]),
         .target(name: "HaetaeAppCore", dependencies: ["HaetaeShared"]),
-        .testTarget(name: "HaetaeChecksTests", dependencies: ["HaetaeChecks"]),
+        .testTarget(name: "HaetaeSharedTests", dependencies: ["HaetaeShared"]),
+        .testTarget(name: "HaetaeChecksTests", dependencies: ["HaetaeChecks", "HaetaeShared"]),
         .testTarget(name: "HaetaeAppCoreTests", dependencies: ["HaetaeAppCore", "HaetaeShared"]),
     ]
 )

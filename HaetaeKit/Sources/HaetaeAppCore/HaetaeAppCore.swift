@@ -1,1 +1,1 @@
-public enum HaetaeAppCore {}
+// 빌드용 자리. 이 타깃에 첫 실제 파일이 들어오면(WO-13) 이 파일을 지운다.
