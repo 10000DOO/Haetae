@@ -11,22 +11,58 @@
 		70A4FD0230AEEA0100EF4C41 /* HaetaeAppCore in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0230AEEA0000EF4C41 /* HaetaeAppCore */; };
 		70A4FD0330AEEA0100EF4C41 /* HaetaeShared in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0330AEEA0000EF4C41 /* HaetaeShared */; };
 		70A4FD0430AEEA0100EF4C41 /* HaetaeChecks in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0430AEEA0000EF4C41 /* HaetaeChecks */; };
+		70A4FD1130AEEA0000EF4C41 /* haetaed in Copy haetaed */ = {isa = PBXBuildFile; fileRef = 70A4FC4830AEE99800EF4C41 /* haetaed */; };
+		70A4FD1230AEEA0000EF4C41 /* com.10000DOO.haetaed.plist in Copy LaunchDaemons */ = {isa = PBXBuildFile; fileRef = 70A4FD2230AEEA0000EF4C41 /* com.10000DOO.haetaed.plist */; };
+		70A4FD1330AEEA0000EF4C41 /* com.10000DOO.Haetae.agent.plist in Copy LaunchAgents */ = {isa = PBXBuildFile; fileRef = 70A4FD2330AEEA0000EF4C41 /* com.10000DOO.Haetae.agent.plist */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		70A4FD1430AEEA0000EF4C41 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 70A4FC2E30AEE96700EF4C41 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 70A4FC4730AEE99800EF4C41;
+			remoteInfo = haetaed;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
-		70A4FC4630AEE99800EF4C41 /* CopyFiles */ = {
+		70A4FD1630AEEA0000EF4C41 /* Copy haetaed */ = {
 			isa = PBXCopyFilesBuildPhase;
-			dstPath = /usr/share/man/man1/;
-			dstSubfolder = None;
+			dstPath = "";
+			dstSubfolder = Executables;
 			files = (
+				70A4FD1130AEEA0000EF4C41 /* haetaed in Copy haetaed */,
 			);
-			runOnlyForDeploymentPostprocessing = 1;
+			name = "Copy haetaed";
+		};
+		70A4FD1730AEEA0000EF4C41 /* Copy LaunchDaemons */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Library/LaunchDaemons;
+			dstSubfolder = Wrapper;
+			files = (
+				70A4FD1230AEEA0000EF4C41 /* com.10000DOO.haetaed.plist in Copy LaunchDaemons */,
+			);
+			name = "Copy LaunchDaemons";
+		};
+		70A4FD1830AEEA0000EF4C41 /* Copy LaunchAgents */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Library/LaunchAgents;
+			dstSubfolder = Wrapper;
+			files = (
+				70A4FD1330AEEA0000EF4C41 /* com.10000DOO.Haetae.agent.plist in Copy LaunchAgents */,
+			);
+			name = "Copy LaunchAgents";
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		70A4FC3630AEE96700EF4C41 /* Haetae.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Haetae.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		70A4FC4830AEE99800EF4C41 /* haetaed */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = haetaed; sourceTree = BUILT_PRODUCTS_DIR; };
+		70A4FD2030AEEA0000EF4C41 /* Haetae-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Haetae-Info.plist"; sourceTree = "<group>"; };
+		70A4FD2130AEEA0000EF4C41 /* haetaed-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "haetaed-Info.plist"; sourceTree = "<group>"; };
+		70A4FD2230AEEA0000EF4C41 /* com.10000DOO.haetaed.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.10000DOO.haetaed.plist; sourceTree = "<group>"; };
+		70A4FD2330AEEA0000EF4C41 /* com.10000DOO.Haetae.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.10000DOO.Haetae.agent.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -65,6 +101,7 @@
 			children = (
 				70A4FC3830AEE96700EF4C41 /* Haetae */,
 				70A4FC4930AEE99800EF4C41 /* haetaed */,
+				70A4FD2430AEEA0000EF4C41 /* Support */,
 				70A4FC3730AEE96700EF4C41 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,6 +115,33 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		70A4FD2430AEEA0000EF4C41 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				70A4FD2030AEEA0000EF4C41 /* Haetae-Info.plist */,
+				70A4FD2130AEEA0000EF4C41 /* haetaed-Info.plist */,
+				70A4FD2530AEEA0000EF4C41 /* LaunchDaemons */,
+				70A4FD2630AEEA0000EF4C41 /* LaunchAgents */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		70A4FD2530AEEA0000EF4C41 /* LaunchDaemons */ = {
+			isa = PBXGroup;
+			children = (
+				70A4FD2230AEEA0000EF4C41 /* com.10000DOO.haetaed.plist */,
+			);
+			path = LaunchDaemons;
+			sourceTree = "<group>";
+		};
+		70A4FD2630AEEA0000EF4C41 /* LaunchAgents */ = {
+			isa = PBXGroup;
+			children = (
+				70A4FD2330AEEA0000EF4C41 /* com.10000DOO.Haetae.agent.plist */,
+			);
+			path = LaunchAgents;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -88,8 +152,14 @@
 				70A4FC3230AEE96700EF4C41 /* Sources */,
 				70A4FC3330AEE96700EF4C41 /* Frameworks */,
 				70A4FC3430AEE96700EF4C41 /* Resources */,
+				70A4FD1630AEEA0000EF4C41 /* Copy haetaed */,
+				70A4FD1730AEEA0000EF4C41 /* Copy LaunchDaemons */,
+				70A4FD1830AEEA0000EF4C41 /* Copy LaunchAgents */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				70A4FD1530AEEA0000EF4C41 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				70A4FC3830AEE96700EF4C41 /* Haetae */,
@@ -109,7 +179,6 @@
 			buildPhases = (
 				70A4FC4430AEE99800EF4C41 /* Sources */,
 				70A4FC4530AEE99800EF4C41 /* Frameworks */,
-				70A4FC4630AEE99800EF4C41 /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -187,6 +256,14 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		70A4FD1530AEEA0000EF4C41 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 70A4FC4730AEE99800EF4C41 /* haetaed */;
+			targetProxy = 70A4FD1430AEEA0000EF4C41 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
 		70A4FC3F30AEE96800EF4C41 /* Debug configuration for PBXProject "Haetae" */ = {
 			isa = XCBuildConfiguration;
@@ -222,6 +299,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -240,6 +318,8 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				HAETAE_MIN_BUILD = "$(CURRENT_PROJECT_VERSION)";
+				HAETAE_TEAM_ID = "$(DEVELOPMENT_TEAM)";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -285,6 +365,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -297,6 +378,8 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				HAETAE_MIN_BUILD = "$(CURRENT_PROJECT_VERSION)";
+				HAETAE_TEAM_ID = "$(DEVELOPMENT_TEAM)";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -314,11 +397,13 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 47XT7DPDLP;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Support/Haetae-Info.plist";
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -344,13 +429,16 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 47XT7DPDLP;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Support/Haetae-Info.plist";
+				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -375,9 +463,14 @@
 			buildSettings = {
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Support/haetaed-Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.haetaed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
@@ -388,10 +481,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Support/haetaed-Info.plist";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.haetaed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
