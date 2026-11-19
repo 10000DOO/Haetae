@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-19 · 브랜치: `main` · 다음 액션: WO-3(Xcode 번들 구성)부터 1회 1WO로 진행(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-20 · 브랜치: `main` · 다음 액션: WO-4(데몬 뼈대)부터 1회 1WO로 진행(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -457,7 +457,7 @@ sequenceDiagram
 | D17 | 감시 대상 구조 | 대상 하나 = `SecurityCheck` 하나. `run(context:)`의 `CheckContext`에 기준값, 패턴 팩의 자기 구역, 사용자 범위, `SafeFileReader`, `CommandRunner`를 담아 넘김. `CheckRunner`가 검사별 타임아웃을 걸고, 실패·타임아웃은 상태 `Finding`으로 올리고(연속 N회면 알림), 실패한 검사는 기준값을 갱신하지 않음 | 대상 추가 = 파일 1개 + 목록 1줄 (OCP, 높은 응집도). 로그 폭주 등으로 특정 검사를 조용히 무력화하는 것을 드러냄(T12) | Collector + `RuleEngine` — 대상 추가 때마다 여러 곳 수정 |
 | D18 | 지문과 중복 알림 | `fingerprint` = SHA-256(`checkID` + 정규화된 대상 + 내용 해시·cdhash·TeamID). 데몬 `FindingLedger`에 저장. 억제는 "알림 완료"(ack 받음)만 하고 "LLM이 안전 판정"은 억제하지 않음. 내용이 바뀌면 지문이 바뀌어 다시 판정. 미해결 위험은 패널에 계속 표시. 사라진 지문은 `resolved`로 앱에 알림 | 같은 위험을 15분마다 알리지 않으면서, 인젝션 한 번이나 내용만 바꾸기로 영구히 숨기는 것을 막음(T3) | 앱에 지문 저장 — 악성코드가 미리 심을 수 있음 / 경로만으로 지문 — 내용만 바꿔도 같은 지문 |
 | D19 | 의존성 역전 | 프로토콜은 무거운 의존에만: `FindingSource`·`PatternInstaller`(둘 다 구현 `DaemonClient`, 쓰는 쪽별로 나눔 — ISP), `RiskJudge`(구현 `LLMAnalyzer`, `RuleOnlyJudge`). 모델이 준비되지 않았으면 `RuleOnlyJudge`, 규칙만으로 판정한 건 모델 준비 후 다시 판정 | root 데몬과 모델 없이 `ScanPipeline` 테스트. 모델 받는 동안 판정 공백 해결 (DIP) | 모든 클래스에 프로토콜 |
-| D20 | 버전과 자기 무결성 | 빌드 불일치는 응답의 `daemonBuild`가 아니라 **디스크의 자기 번들 빌드**로 판단한다 — Release에서는 서명 요구사항(Q28, 같은 빌드끼리만 연결) 때문에 빌드가 다르면 응답이 오지 않는다. 앱·데몬 모두 디스크의 자기 빌드가 실행 중인 빌드보다 높으면 스스로 다시 뜬다(데몬 `exit(0)`, 앱은 WO-5 4-1). 앱은 연결이 무효화되면 5·15·30초 간격으로 다시 시도한다. 응답의 `daemonBuild` 비교는 Debug에서만 의미가 있다(데몬은 연결 0개면 종료 후 새 파일로 재실행). plist가 바뀐 업데이트면 `unregister()` → `register()`(필요 여부 7-1 확인). 데몬은 본 최고 빌드 번호를 root 폴더에 기록하고 자기 빌드가 더 낮으면 동작 거부(되돌리기 방지). 여러 사용자가 로그인한 상태의 업데이트(Q30): 데몬은 디스크의 자기 번들 빌드가 실행 중인 빌드보다 높으면 응답을 보낸 뒤 스스로 종료하고(다른 사용자의 옛 앱이 연결을 쥐고 있어도 새 파일로 다시 뜸), 앱은 데몬 빌드가 자기보다 높으면 스스로 다시 실행한다. 데몬은 시작할 때 자기 번들을 검사(소유자 root, 그룹·기타 쓰기 불가, `SecStaticCodeCheckValidity` strict + nested)하고 실패하면 "Haetae 변조"(높음) Finding | 업데이트 직후 형식 불일치 방지. 구버전 설치·번들 변조 공격 탐지(T5) | 버전 확인 없음 |
+| D20 | 버전과 자기 무결성 | 빌드 불일치는 응답의 `daemonBuild`가 아니라 **디스크의 자기 번들 빌드**로 판단한다 — Release에서는 서명 요구사항(Q28, 같은 빌드끼리만 연결) 때문에 빌드가 다르면 응답이 오지 않는다. 앱·데몬 모두 디스크의 자기 빌드가 실행 중인 빌드보다 높으면 스스로 다시 뜬다(데몬 `exit(0)`, 앱은 WO-5 4-1). 앱은 연결이 무효화되면 5·15·30초 간격으로 다시 시도한다. 응답의 `daemonBuild` 비교는 Debug에서만 의미가 있다(데몬은 연결 0개면 종료 후 새 파일로 재실행). plist가 바뀐 업데이트면 `unregister()` → `register()`(필요 여부 7-1 확인). 데몬은 본 최고 빌드 번호를 root 폴더에 기록하고 자기 빌드가 더 낮으면 동작 거부(되돌리기 방지, Release 빌드에서만 — Q34). 여러 사용자가 로그인한 상태의 업데이트(Q30): 데몬은 디스크의 자기 번들 빌드가 실행 중인 빌드보다 높으면 응답을 보낸 뒤 스스로 종료하고(다른 사용자의 옛 앱이 연결을 쥐고 있어도 새 파일로 다시 뜸), 앱은 데몬 빌드가 자기보다 높으면 스스로 다시 실행한다. 데몬은 시작할 때 자기 번들을 검사(소유자 root, 그룹·기타 쓰기 불가, `SecStaticCodeCheckValidity` strict + nested)하고 실패하면 "Haetae 변조"(높음) Finding | 업데이트 직후 형식 불일치 방지. 구버전 설치·번들 변조 공격 탐지(T5) | 버전 확인 없음 |
 | D21 | 저장 데이터 형식 버전 | 기준값·기록·`risks.json`에 `schemaVersion`. 기준값 형식이 바뀌면 그 검사만 기준값을 다시 만듦. 기록은 변환, 불가하면 비움 | 업데이트로 형식이 바뀌어도 깨지지 않음 | 버전 없음 |
 | D22 | 앱 업데이트 | Sparkle 2.10.1(2.7.2 미만 금지). `SUPublicEDKey`(EdDSA), HTTPS 피드, `SUVerifyUpdateBeforeExtraction=YES`, `SURequireSignedFeed=YES`. 비샌드박스 앱이라 `SUEnableInstallerLauncherService`·`SUEnableDownloaderService`는 끔. 업데이트 파일은 `.pkg`(D31). 자동 확인. **강제 업데이트(Q28·Q32)**: 새 버전이 있으면 업데이트 창을 닫거나 건너뛸 수 없고(모든 업데이트를 `criticalUpdate`로 배포, "이 버전 건너뛰기"·"나중에" 없음), 업데이트할 때까지 패널에 "업데이트 필요"(높음)를 띄우고 확인 때마다 창을 다시 띄운다. 검사는 멈추지 않는다. 설치는 `.pkg`라 사용자가 관리자 암호를 넣는다(D31). 서명 요구사항의 최소 빌드는 자기 `CFBundleVersion`이라 같은 빌드끼리만 연결된다(3-7) | 사용자 결정 (Q7, Q9). CVE-2025-10015·10016 (T21) | Homebrew cask만 / 수동 |
 | D23 | 패턴 팩 업데이트 | 검사 기준 데이터만 담은 JSON을 Ed25519로 서명해 따로 배포. 내려받기는 앱(`PatternUpdater`), 검증·저장은 데몬(`PatternStore`): 내장 공개키 서명 확인 → 더 높은 버전만 → `formatVersion` 지원 확인 → root 전용 폴더 저장. 없거나 깨지면 앱에 같이 넣은 기본 팩 사용. 하루 1번 + 앱 시작 때 확인, 통과하면 바로 적용, 패널에 버전 표시. 모델 목록·LLM 프롬프트는 범위 밖(앱 업데이트) | 사용자 결정 (Q8, Q10). 앱이 뚫려도 가짜 패턴을 못 넣음 | 데몬이 직접 내려받기 — root에 네트워크 공격면 / 서명 없는 팩 — 감시 무력화 |
@@ -661,18 +661,19 @@ sequenceDiagram
 - 완료 판정: `swift build` 성공, `rg "setCodeSigningRequirement|HaetaeXPCProtocol" HaetaeKit` 검출
 
 ### WO-3: Xcode 번들 구성 (Build Phases, plist, 서명 설정)
-- 상태: [ ] 대기
+- 리뷰 (2026-11-19, 별도 에이전트 3개: 보안·설계·확장성): Critical 0, 번들 구성 결함 없음. WO 지시와 다르게 한 것(빌드 번호를 프로젝트 수준에, `dstSubfolder` 표기, `CFBundleName`)은 3곳 모두 타당하다고 판단. 조치 — 데몬 plist `Umask`, `haetaed-Info.plist`를 빌드 설정 참조로, WO-4·5·12·44·45·46 지시와 7-1 P1·P6, 8장 보강. pbxproj 참조 무결성(객체 47개, 누락·중복 0)과 `Bundle.main` 동작을 리뷰어가 실측. Q33(root 소유 사본에서만 등록)·Q34(되돌리기 방지는 Release만)·Q35(Release에서 `get-task-allow` 주입 끔)는 사용자가 결정해 반영.
+- 상태: [x] 완료 (Claude, 2026-11-19) — 앱·데몬 Debug 빌드 `** BUILD SUCCEEDED **`. `find`로 `Contents/MacOS/haetaed`·`Contents/Library/LaunchDaemons/com.10000DOO.haetaed.plist`·`Contents/Library/LaunchAgents/com.10000DOO.Haetae.agent.plist` 3개 검출. 데몬 `Identifier=com.10000DOO.haetaed`, 앱·데몬 `flags=0x10000(runtime)`, `TeamIdentifier=47XT7DPDLP`. `codesign --verify --deep --strict <app>` 성공. 앱 Info.plist와 데몬 `__info_plist`에 `HaetaeTeamID=47XT7DPDLP`·`HaetaeMinBuild=1`·`CFBundleVersion=1`. Debug entitlement: 앱 `get-task-allow`, 데몬 `get-task-allow`+`com.apple.application-identifier`(Xcode가 자동으로 넣음). 실제 데몬 등록·기동은 WO-4·5 뒤 7-1 P1에서 확인.
 - 의존: WO-1
 - 충족: R2, R9, R12, R14
 - 대상: `Haetae.xcodeproj/project.pbxproj`, `Support/`(신규, 동기화 그룹이 아닌 일반 그룹) — `Support/Haetae-Info.plist`, `Support/haetaed-Info.plist`, `Support/LaunchDaemons/com.10000DOO.haetaed.plist`, `Support/LaunchAgents/com.10000DOO.Haetae.agent.plist`
 - 변경:
-  1. 데몬 plist: `Label`=`com.10000DOO.haetaed`, `BundleProgram`=`Contents/MacOS/haetaed`, `MachServices`={`com.10000DOO.haetaed`: true}, `AssociatedBundleIdentifiers`=[`com.10000DOO.Haetae`]. `RunAtLoad`·`KeepAlive` 없음(D15).
+  1. 데몬 plist: `Label`=`com.10000DOO.haetaed`, `BundleProgram`=`Contents/MacOS/haetaed`, `MachServices`={`com.10000DOO.haetaed`: true}, `AssociatedBundleIdentifiers`=[`com.10000DOO.Haetae`], `Umask`=63(8진수 077 — 데몬 코드가 권한 지정을 빠뜨려도 root 전용 파일이 됨, T1). `RunAtLoad`·`KeepAlive` 없음(D15).
   2. 에이전트 plist: `Label`=`com.10000DOO.Haetae.agent`, `BundleProgram`=`Contents/MacOS/Haetae`, `RunAtLoad`=true, `KeepAlive`={`SuccessfulExit`: false}, `LimitLoadToSessionType`=`Aqua`, `EnvironmentVariables`={`HAETAE_LAUNCHED_BY_AGENT`: "1"}, `AssociatedBundleIdentifiers`=[`com.10000DOO.Haetae`]
-  3. `Haetae` 타깃 Build Phases: Target Dependencies에 `haetaed`. Copy Files 3개 — ① Executables(`dstSubfolderSpec = 6`): `haetaed` 산출물 ② Wrapper(`dstSubfolderSpec = 1`, `dstPath = Contents/Library/LaunchDaemons`): 데몬 plist ③ Wrapper(`dstPath = Contents/Library/LaunchAgents`): 에이전트 plist. Code Sign On Copy는 끈다(데몬은 자기 타깃에서 서명됨).
-  4. `Haetae` 타깃 빌드 설정: `ENABLE_HARDENED_RUNTIME = YES`, `INFOPLIST_KEY_LSUIElement = YES`, `INFOPLIST_FILE = Support/Haetae-Info.plist`(GENERATE_INFOPLIST_FILE=YES와 병합됨), 사용자 정의 `HAETAE_TEAM_ID = $(DEVELOPMENT_TEAM)`, `HAETAE_MIN_BUILD = $(CURRENT_PROJECT_VERSION)`(Q28 — 자기 빌드가 최소 빌드. 같은 빌드끼리만 연결되어 옛 버전 앱이 데몬에 못 붙는다)
+  3. `Haetae` 타깃 Build Phases: Target Dependencies에 `haetaed`. Copy Files 3개(Xcode 27 표기 `dstSubfolder = Executables`/`Wrapper`, 옛 `dstSubfolderSpec` 숫자 아님) — ① `Copy haetaed`(Executables): `haetaed` 산출물 ② `Copy LaunchDaemons`(Wrapper, `dstPath = Contents/Library/LaunchDaemons`): 데몬 plist ③ `Copy LaunchAgents`(Wrapper, `dstPath = Contents/Library/LaunchAgents`): 에이전트 plist. 템플릿의 빈 man page Copy Files 단계는 지운다. Code Sign On Copy는 끈다(데몬은 자기 타깃에서 서명됨).
+  4. `Haetae` 타깃 빌드 설정: `ENABLE_HARDENED_RUNTIME = YES`, `INFOPLIST_KEY_LSUIElement = YES`, `INFOPLIST_FILE = Support/Haetae-Info.plist`(GENERATE_INFOPLIST_FILE=YES와 병합됨), **프로젝트 수준**(두 타깃이 같은 값을 쓰게 한 곳에만 둔다)에 `CURRENT_PROJECT_VERSION`, 사용자 정의 `HAETAE_TEAM_ID = $(DEVELOPMENT_TEAM)`, `HAETAE_MIN_BUILD = $(CURRENT_PROJECT_VERSION)`(Q28 — 자기 빌드가 최소 빌드. 같은 빌드끼리만 연결되어 옛 버전 앱이 데몬에 못 붙는다). 앱 타깃의 `CURRENT_PROJECT_VERSION`은 지운다
   5. `Support/Haetae-Info.plist`: `HaetaeTeamID`=`$(HAETAE_TEAM_ID)`, `HaetaeMinBuild`=`$(HAETAE_MIN_BUILD)`
-  6. `haetaed` 타깃 빌드 설정: `PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.haetaed`, `CREATE_INFOPLIST_SECTION_IN_BINARY = YES`, `INFOPLIST_FILE = Support/haetaed-Info.plist`, `ENABLE_HARDENED_RUNTIME = YES`, `SKIP_INSTALL = YES`, `HAETAE_TEAM_ID`·`HAETAE_MIN_BUILD` 동일
-  7. `Support/haetaed-Info.plist`: `CFBundleIdentifier`=`com.10000DOO.haetaed`, `CFBundleVersion`=`$(CURRENT_PROJECT_VERSION)`, `HaetaeTeamID`, `HaetaeMinBuild`
+  6. `haetaed` 타깃 빌드 설정: `PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.haetaed`, `CREATE_INFOPLIST_SECTION_IN_BINARY = YES`, `INFOPLIST_FILE = Support/haetaed-Info.plist`, `ENABLE_HARDENED_RUNTIME = YES`, `SKIP_INSTALL = YES`(`HAETAE_TEAM_ID`·`HAETAE_MIN_BUILD`·`CURRENT_PROJECT_VERSION`은 프로젝트 수준 값을 물려받음)
+  7. `Support/haetaed-Info.plist`: `CFBundleIdentifier`=`$(PRODUCT_BUNDLE_IDENTIFIER)`, `CFBundleName`=`$(PRODUCT_NAME)`, `CFBundleVersion`=`$(CURRENT_PROJECT_VERSION)`, `HaetaeTeamID`, `HaetaeMinBuild`
   8. `CURRENT_PROJECT_VERSION`은 정수만 쓴다(8장)
 - 금지: Debug/Release 구성, 배포 타깃(15.0), `DEVELOPMENT_TEAM` 변경 금지. entitlement 파일을 만들지 않는다(예외 entitlement 0개, 3-7).
 - 완료 판정: Debug 빌드 후 `find <Haetae.app> -path '*Contents/MacOS/haetaed' -o -name 'com.10000DOO.*.plist'` 3개 검출. `codesign -dv --verbose=4 <app>/Contents/MacOS/haetaed` → `Identifier=com.10000DOO.haetaed`, `flags=…runtime`. `codesign --verify --deep --strict <app>` 성공.
@@ -686,6 +687,7 @@ sequenceDiagram
   1. `main.swift`: `NSXPCListener(machServiceName: HaetaeXPC.machServiceName)`, delegate 설정, `resume()`, `dispatchMain()`. `os.Logger(subsystem: "com.10000DOO.haetaed", category: …)` 사용.
   2. `ListenerDelegate.listener(_:shouldAcceptNewConnection:)`: `newConnection.setCodeSigningRequirement(CodeRequirements.app(…))`를 **resume 전에** 호출한다. 요구사항 문자열은 데몬 시작 때 한 번 만든다. `CodeRequirements.app`이 throw하면 `Logger.fault`를 남기고 **모든 연결을 `return false`로 거부**한다(`try?` 뒤 요구사항 없이 `resume()` 금지 — fail-closed). 서비스 이름은 `HaetaeXPC.machServiceName`, 오류 응답은 `HaetaeXPCError.….nsError`만 쓴다. `variant`는 이 타깃에서 `#if DEBUG` → `.debug`, 아니면 `.release`로 고른다(WO-2 7번). `exportedInterface = NSXPCInterface(with: HaetaeXPCProtocol.self)`, `exportedObject = CollectService(callerUID: newConnection.effectiveUserIdentifier)`. listener 단계 `setConnectionCodeSigningRequirement`는 쓰지 않는다(3-7).
   3. 연결 수를 세고, `invalidationHandler`에서 줄인다. 유효한 메서드 호출이 한 번도 없이 끊긴 연결은 `invalidAttempts`로 센다(Phase 2에서 `FindingLedger`에 기록, 지금은 로그만). 연결이 0개가 되면 5초 뒤 다시 확인하고, 여전히 0이면 `exit(0)`(D15).
+  3-1. 팀 ID·최소 빌드 읽기와 자기 대조: 데몬은 `Bundle.main.infoDictionary`(실행 파일에 내장된 `__info_plist` — 서명에 묶여 있음)에서 `HaetaeTeamID`·`HaetaeMinBuild`를 읽는다. `Bundle.main.bundleURL`은 `Haetae.app`이므로 `bundleURL/Contents/Info.plist`는 읽지 않는다(앱의 파일이고, 번들이 사용자 쓰기 가능하면 바뀔 수 있다). 읽은 팀 ID로 자기 자신을 검사한다 — `SecCodeCopySelf` + `SecRequirementCreateWithString("anchor apple generic and certificate leaf[subject.OU] = \"<팀 ID>\"")` + `SecCodeCheckValidity`. 안 맞으면 모든 연결을 거부한다(fail-closed).
   4. `CollectService`(지금은 임시): `collect`는 빈 `CollectResult`(`daemonBuild` = 내장 Info.plist의 `CFBundleVersion`)를 JSON으로 응답. `ack`·`installPatterns`는 "미구현" NSError. `markUserQuit`는 로그만.
   5. PID·실행 경로로 상대를 판단하는 코드는 쓰지 않는다.
 - 금지: 셸 실행, 사용자 파일 읽기(Phase 2 전까지)
@@ -699,10 +701,10 @@ sequenceDiagram
 - 변경:
   1. `HaetaeApp`: `WindowGroup`을 없애고 `MenuBarExtra("Haetae", systemImage: "shield") { PanelView() }.menuBarExtraStyle(.window)` + `Settings { SettingsView() }`
   2. `AppState`(`@Observable @MainActor`): `daemonStatus`(`notRegistered`, `requiresApproval`, `connecting`, `connected(build)`, `verificationFailed`, `error(String)`)
-  3. `ServiceRegistrar`: `SMAppService.daemon(plistName: "com.10000DOO.haetaed.plist")`, `SMAppService.agent(plistName: "com.10000DOO.Haetae.agent.plist")`. 첫 실행이면(UserDefaults 플래그) 둘 다 `register()`. `.requiresApproval`이면 패널에 안내 + `SMAppService.openSystemSettingsLoginItems()`. `setLaunchAtLogin(_:)`는 agent `register()`/`unregister()`.
-  4. 단일 실행: 시작할 때 같은 번들 ID의 다른 인스턴스가 있으면 자기는 `exit(0)`. 환경 변수 `HAETAE_LAUNCHED_BY_AGENT`가 없는 인스턴스(Finder에서 연 것)이고 agent가 등록돼 있으면, agent 인스턴스가 뜨게 한 뒤(agent `unregister()` → `register()`, `RunAtLoad`) 자기는 종료한다. 이 방식이 실제로 되는지는 7-1 P1에서 확인하고, 안 되면 `[!]`로 표시하고 9장에 올린다.
+  3. `ServiceRegistrar`: 등록 전에 자기 번들이 root 소유이고 그룹·기타 쓰기 비트가 없는지 확인한다. 아니면(DerivedData에서 바로 실행한 경우 등) `register()`하지 않고 패널에 "`/Applications`에 설치한 뒤 실행하세요"를 표시한다(Q33 — Debug·Release 모두). `SMAppService.daemon(plistName: "com.10000DOO.haetaed.plist")`, `SMAppService.agent(plistName: "com.10000DOO.Haetae.agent.plist")`. 첫 실행이면(UserDefaults 플래그) 둘 다 `register()`. `.requiresApproval`이면 패널에 안내 + `SMAppService.openSystemSettingsLoginItems()`. `setLaunchAtLogin(_:)`는 agent `register()`/`unregister()`.
+  4. 단일 실행: 시작할 때 같은 번들 ID의 다른 인스턴스가 있으면 자기는 종료한다 — Finder에서 연 인스턴스는 `exit(0)`, launchd가 띄운 agent 인스턴스가 양보할 때는 `exit(75)`(0으로 끝내면 `SuccessfulExit=false` 조건 때문에 launchd가 다시 띄우지 않아, 공격자가 가짜 인스턴스를 띄웠다 끄는 것으로 다음 로그인까지 감시를 멈출 수 있다). `HAETAE_LAUNCHED_BY_AGENT`는 누구나 붙일 수 있으니 신뢰 판단에 쓰지 않는다(어느 쪽이 양보할지 정하는 데만 쓴다). 환경 변수 `HAETAE_LAUNCHED_BY_AGENT`가 없는 인스턴스(Finder에서 연 것)이고 agent가 등록돼 있으면, agent 인스턴스가 뜨게 한 뒤(agent `unregister()` → `register()`, `RunAtLoad`) 자기는 종료한다. 이 방식이 실제로 되는지는 7-1 P1에서 확인하고, 안 되면 `[!]`로 표시하고 9장에 올린다.
   4-1. 의도한 재실행(Q30): 새 인스턴스를 직접 띄우지 않는다(단일 실행 규칙 때문에 둘 다 꺼짐). `markUserQuit()`(데몬이 비정상 종료로 기록하지 않게) → `exit(75)`(고정된 0이 아닌 코드) → agent의 `KeepAlive{SuccessfulExit=false}`가 다시 띄운다. 재실행 횟수는 `UserDefaults`에 빌드별로 저장해 3번을 넘기지 않는다(메모리에만 두면 재실행마다 0이 돼 무한 반복). agent가 등록돼 있지 않으면 재실행하지 않고 패널에 "다시 실행 필요"를 표시한다. 실제로 되는지는 7-1 P1·P6에서 확인하고, 안 되면 `[!]`로 표시하고 9장에 올린다.
-  5. `DaemonClient`: `NSXPCConnection(machServiceName: HaetaeXPC.machServiceName, options: .privileged)`, `setCodeSigningRequirement(CodeRequirements.daemon(…))`를 resume 전에 호출. `CodeRequirements.daemon`이 throw하면 연결을 만들지 않고 `daemonStatus = .error("팀 ID 설정 오류")`로 둔다(fail-closed). 서비스 이름은 `HaetaeXPC.machServiceName`. `collect` 응답은 `CollectResult.decodeValidated`로만 푼다(`JSONWire.decode`는 `package`라 앱 타깃에서 안 보인다 — `public`으로 되돌리지 않는다). 오류 응답은 도메인이 `HaetaeXPC.errorDomain`인지 확인한 뒤 `HaetaeXPCError(rawValue: error.code)`로 푼다. **빌드 불일치 처리(D20, Q28, Q30)**: Release에서는 빌드가 다르면 서명 요구사항 때문에 응답 자체가 오지 않으므로 응답의 `daemonBuild`에 기대지 않는다. ① `collect` 전과 연결이 무효화됐을 때 디스크의 자기 번들 `Contents/Info.plist`의 `CFBundleVersion`을 읽어 실행 중인 빌드보다 높으면 앱이 스스로 다시 실행한다(방법은 4-1번). ② 무효화되면 새 `NSXPCConnection`으로 5·15·30초 간격으로 다시 시도하고(옛 데몬이 스스로 꺼지고 새 데몬이 뜰 시간), 그래도 실패할 때만 `daemonStatus = .verificationFailed`로 둔다. ③ `decodeHeader`의 `daemonBuild` 비교는 Debug(요구사항에 빌드 조건이 없음)에서만 쓴다. `ack`는 `HaetaeXPC.encodeAck`로 만든다. `variant`는 이 타깃에서 `#if DEBUG` → `.debug`, 아니면 `.release`로 고른다(WO-2 7번). `remoteObjectProxyWithErrorHandler`와 `withCheckedThrowingContinuation`으로 async 메서드 제공(타임아웃 30초). 성공 응답 없이 무효화되면 `daemonStatus = .verificationFailed`(패널에 "높음"으로 표시).
+  5. `DaemonClient`: `NSXPCConnection(machServiceName: HaetaeXPC.machServiceName, options: .privileged)`, `setCodeSigningRequirement(CodeRequirements.daemon(…))`를 resume 전에 호출. `CodeRequirements.daemon`이 throw하면 연결을 만들지 않고 `daemonStatus = .error("팀 ID 설정 오류")`로 둔다(fail-closed). 앱의 `HaetaeTeamID`는 디스크의 `Contents/Info.plist`에서 오므로, 읽은 팀 ID로 자기 자신을 먼저 검사한다(`SecCodeCopySelf` + `SecCodeCheckValidity`, WO-4 3-1과 같은 방식) — 안 맞으면 연결하지 않고 `.error`. 서비스 이름은 `HaetaeXPC.machServiceName`. `collect` 응답은 `CollectResult.decodeValidated`로만 푼다(`JSONWire.decode`는 `package`라 앱 타깃에서 안 보인다 — `public`으로 되돌리지 않는다). 오류 응답은 도메인이 `HaetaeXPC.errorDomain`인지 확인한 뒤 `HaetaeXPCError(rawValue: error.code)`로 푼다. **빌드 불일치 처리(D20, Q28, Q30)**: Release에서는 빌드가 다르면 서명 요구사항 때문에 응답 자체가 오지 않으므로 응답의 `daemonBuild`에 기대지 않는다. ① `collect` 전과 연결이 무효화됐을 때 디스크의 자기 번들 `Contents/Info.plist`의 `CFBundleVersion`을 읽어 실행 중인 빌드보다 높으면 앱이 스스로 다시 실행한다(방법은 4-1번). ② 무효화되면 새 `NSXPCConnection`으로 5·15·30초 간격으로 다시 시도하고(옛 데몬이 스스로 꺼지고 새 데몬이 뜰 시간), 그래도 실패할 때만 `daemonStatus = .verificationFailed`로 둔다. ③ `decodeHeader`의 `daemonBuild` 비교는 Debug(요구사항에 빌드 조건이 없음)에서만 쓴다. `ack`는 `HaetaeXPC.encodeAck`로 만든다. `variant`는 이 타깃에서 `#if DEBUG` → `.debug`, 아니면 `.release`로 고른다(WO-2 7번). `remoteObjectProxyWithErrorHandler`와 `withCheckedThrowingContinuation`으로 async 메서드 제공(타임아웃 30초). 성공 응답 없이 무효화되면 `daemonStatus = .verificationFailed`(패널에 "높음"으로 표시).
   6. 패널의 "종료" 버튼: `markUserQuit()`(최대 2초 대기) → `NSApp.terminate(nil)`(exit 0 → agent가 재실행하지 않음)
   7. 패널(임시): 데몬 상태와 빌드 번호, "종료" 버튼
 - 금지: 앱 번들에서 NIB·플러그인 동적 로드 금지(3-7). 알림·검사 로직은 Phase 2.
@@ -805,9 +807,9 @@ sequenceDiagram
   2. `ack`: `HaetaeXPC.decodeAck`(크기·개수 `maxAckFingerprints`·지문 형식 검증) → `ledger.acknowledge` → 해당 검사의 pending 기준값 반영
   3. `markUserQuit`: `ledger.record(.userQuit)`. 연결이 `markUserQuit` 없이 끊기면 `ledger.record(.abnormalTermination(uid, 시각))`. 유효한 호출 없이 끊긴 연결은 `ledger.record(.invalidConnection)`(K 검사가 사용)
   4. 빈도 제한: `collect`는 같은 사용자 기준으로 20초에 1번(그 사이 요청은 진행 중인 결과를 공유한다)
-  5. 시작 시 자기 무결성(D20): 실행 파일 경로에서 상위 `.app`을 찾는다. 번들 소유자가 root이고 그룹·기타 쓰기 비트가 없는지, `SecStaticCodeCheckValidity(… kSecCSStrictValidate | kSecCSCheckNestedCode …)`가 통과하는지 확인한다. 실패하면 `ledger.record(.selfIntegrityFailed(사유))`. Debug 빌드(DerivedData 경로)에서는 소유자 검사를 건너뛰고 로그만 남긴다.
-  6. 되돌리기 방지(D20): `highest-build`를 SecureDirectory에 기록하고, 자기 `CFBundleVersion`이 더 낮으면 모든 메서드가 오류를 돌려주고 사건을 기록한다.
-  7. 새 빌드 감지(D20, Q30): 디스크의 자기 번들 `CFBundleVersion`이 실행 중인 빌드보다 높으면 `exit(0)`한다(launchd가 다음 연결 때 새 파일로 띄움). 확인 시점은 `collect` 처리 전과, 유효한 호출 없이 끊긴 연결을 셀 때다 — Release에서는 새 앱이 옛 데몬을 서명 요구사항으로 거부해 `collect`가 오지 않을 수 있다. 이때 끊긴 연결은 `invalidConnection`으로 세지 않는다(K 검사 오탐 방지). 비교는 `CollectCoordinator`의 순수 함수로 두고, 번들 읽기는 `main`이 한다.
+  5. 시작 시 자기 무결성(D20): 실행 파일 경로에서 상위 `.app`을 찾는다. 번들 소유자가 root이고 그룹·기타 쓰기 비트가 없는지, `SecStaticCodeCheckValidity(… kSecCSStrictValidate | kSecCSCheckNestedCode …)`가 통과하는지 확인한다. 실패하면 `ledger.record(.selfIntegrityFailed(사유))`. Debug 빌드도 root 소유 사본에서만 등록하므로(Q33) 소유자 검사를 건너뛰지 않는다.
+  6. 되돌리기 방지(D20): Release(`variant == .release`)에서만 한다(Q34 — Debug와 Release가 같은 root 폴더를 써서, Release를 한 번 설치하면 번호가 낮은 Debug 데몬이 모두 거부당한다). Debug는 `highest-build`를 읽지도 쓰지도 않는다. `highest-build`를 SecureDirectory에 기록하고, 자기 `CFBundleVersion`이 더 낮으면 모든 메서드가 오류를 돌려주고 사건을 기록한다.
+  7. 새 빌드 감지(D20, Q30): 디스크의 자기 번들 `CFBundleVersion`이 실행 중인 빌드보다 높으면 `exit(0)`한다(launchd가 다음 연결 때 새 파일로 띄움). 확인 시점은 `collect` 처리 전과, 유효한 호출 없이 끊긴 연결을 셀 때다 — Release에서는 새 앱이 옛 데몬을 서명 요구사항으로 거부해 `collect`가 오지 않을 수 있다. 이때 끊긴 연결은 `invalidConnection`으로 세지 않는다(K 검사 오탐 방지). 비교는 `CollectCoordinator`의 순수 함수로 두고, 번들 읽기는 `main`이 한다. 데몬의 디스크 빌드는 `CFBundleCopyInfoDictionaryForURL(Bundle.main.executableURL! as CFURL)`로 읽는다(자기 실행 파일의 내장 plist). `Bundle.main.bundleURL/Contents/Info.plist`는 앱의 것이라 쓰지 않는다.
 - 금지: 메서드 추가 금지(4개 고정, D27). 경로·명령 인자를 받는 API 금지.
 - 완료 판정: 데몬 빌드 성공, `rg "func (collect|ack|installPatterns|markUserQuit)" haetaed` 정확히 4개
 
@@ -894,7 +896,7 @@ sequenceDiagram
   5. `CheckRunner`: 타임아웃 검사가 다른 검사를 막지 않는지, 실패하면 기준값이 그대로인지, 연속 3번 실패하면 높음으로 오르는지, 첫 실행 규칙, 개수·길이 상한, `runAll` 결과가 `validate()`를 통과하는지
   6. `SecretMasker`: 토큰, 비밀번호, 개인키, URL 쿼리
   7. WO-15~18 파서와 규칙: 픽스처 출력으로 기대 Finding이 나오는지
-  8. `CollectCoordinator`: 20초 빈도 제한과 결과 공유, ack 개수 상한 1,000, `maxReplyBytes` 초과 시 낮은 수준부터 잘라 "높음"이 남는지, 되돌리기 방지, 연결 종료 기록 3종
+  8. `CollectCoordinator`: 되돌리기 방지가 Release에서만 켜지는지(Debug는 낮은 빌드여도 동작), 20초 빈도 제한과 결과 공유, ack 개수 상한 1,000, `maxReplyBytes` 초과 시 낮은 수준부터 잘라 "높음"이 남는지, 되돌리기 방지, 연결 종료 기록 3종
   9. `ScanPipeline`: 가짜 `FindingSource`·`RiskJudge`로 ack 순서(저장·알림 다음에 ack), 새 위험만 알림, 오류 뒤 다음 주기에 회복
   10. `ScanScheduler`: 주기 상·하한, 일시정지 자동 만료(가짜 Clock)
   11. `RiskStore`: 파일 권한 0600, 30일 정리
@@ -1077,17 +1079,18 @@ sequenceDiagram
 - 대상: `Tools/release/release.sh`(신규)
 - 변경: Release 빌드(`xcodebuild archive -onlyUsePackageVersionsFromResolvedFile` → export, `-skipMacroValidation`·`-skipPackagePluginValidation` 금지 — D16) → Developer ID Application 서명(`--options runtime --timestamp`) 확인 → `pkgbuild --root`(설치 위치 `/Applications`, 소유자 root) + `productbuild --sign "Developer ID Installer: …"` → `xcrun notarytool submit --wait` → `xcrun stapler staple` → Sparkle `generate_appcast`(EdDSA 키는 키체인) → GitHub Release 업로드(`gh release create`). 비밀값은 환경 변수와 키체인 프로필(`notarytool store-credentials`)로만 쓴다.
 - 금지: 인증서·암호·EdDSA 개인키를 저장소에 넣지 않음
-- 완료 판정: dry-run 모드(`--dry-run`)가 각 단계 명령을 출력. `rg -n 'skipMacroValidation|skipPackagePluginValidation|disable-sandbox' Tools/` → 0곳. `Haetae`·`haetaed` 스킴을 Shared로 커밋(`Haetae.xcodeproj/xcshareddata/xcschemes/`) — 깨끗한 클론이 자동 생성 스킴에 기대지 않게
+- 추가 지시(WO-3 리뷰): ① 시작 전에 WO-46 절차(개발용 등록 해제)를 1회 실행하고 `/Applications/Haetae.app`(Debug 사본)을 지운다. ② 버전은 pbxproj 프로젝트 수준 `CURRENT_PROJECT_VERSION`을 올려 커밋한 뒤 빌드한다(명령줄 재정의만 쓰면 저장소 값이 낮게 남아, 설치 뒤 Debug 데몬이 되돌리기로 판단해 모든 요청을 거부한다). ③ `pkgbuild --analyze --root "$STAGE" comp.plist` → `plutil -replace 0.BundleIsRelocatable -bool NO comp.plist` → `pkgbuild --root "$STAGE" --component-plist comp.plist --install-location /Applications` (기본값은 재배치 가능이라, 같은 번들 ID의 다른 사본(DerivedData 등)이 있으면 `/Applications`가 아니라 그 사본을 덮어쓴다 — D31·T5가 무력화됨). ④ 빌드 번호 일치 검사: 앱 `CFBundleVersion`, 데몬 `__info_plist`의 `CFBundleVersion`, `HaetaeMinBuild` 셋이 다르면 중단.
+- 완료 판정: dry-run 모드(`--dry-run`)가 각 단계 명령을 출력. `plutil -extract 0.BundleIsRelocatable raw comp.plist` → `false`. archive의 `Products/`에 `Applications/Haetae.app` 하나만 있고 그 안의 `haetaed`가 `codesign --verify --strict` 통과. export한 데몬이 실제로 뜸. `otool -l <archive 앱>/Contents/MacOS/* | grep -A2 LC_RPATH`에 `/Users/`·`/Volumes/` 없음(Debug 산출물에는 로컬 절대 경로가 들어 있음). `rg -n 'skipMacroValidation|skipPackagePluginValidation|disable-sandbox' Tools/` → 0곳. `Haetae`·`haetaed` 스킴을 Shared로 커밋(`Haetae.xcodeproj/xcshareddata/xcschemes/`) — 깨끗한 클론이 자동 생성 스킴에 기대지 않게
 
 ### WO-45: Release 서명 요구사항과 entitlement 감사 (3-7)
 - 상태: [ ] 대기 · 의존: WO-44 · 충족: R16
-- 변경: 유료 팀 ID로 `HAETAE_TEAM_ID`를 갱신하고, `HAETAE_MIN_BUILD`가 `$(CURRENT_PROJECT_VERSION)`인지 확인한다(Q28). `codesign -d --entitlements - ` 결과가 비었는지(앱·데몬) 확인한다. 3-7 검증 항목 전체를 Release 빌드로 다시 실행한다. 앱·데몬이 Release에서 `.release` 요구사항을 쓰는지는 7-1 P6 "Release 요구사항"·"Release 앱의 `variant`" 두 항목으로 확인한다(두 문자열이 모두 바이너리에 들어가므로 `strings`로는 확인할 수 없다).
+- 변경: `DEVELOPMENT_TEAM`(두 타깃 × Debug·Release, 4곳)을 유료 팀 ID로 바꾸고(`HAETAE_TEAM_ID`는 따라온다), `HAETAE_MIN_BUILD`가 `$(CURRENT_PROJECT_VERSION)`인지 확인한다(Q28). 두 타깃 Release에는 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`가 들어 있다(Q35 — `get-task-allow`를 빌드 때부터 뺌). `codesign -d --entitlements - ` 결과에 예외 entitlement(`get-task-allow`, `com.apple.security.cs.*`)가 없는지(앱·데몬) 확인한다 — 데몬의 `com.apple.application-identifier`는 Xcode가 명령줄 도구에 자동으로 넣는 것이라 허용하되, export 뒤에도 남는지와 root로 뜨는지를 적는다. `ls <app>/Contents/MacOS`에 `Haetae.debug.dylib`·`__preview.dylib`가 없는지 확인한다. 3-7 검증 항목 전체를 Release 빌드로 다시 실행한다. 앱·데몬이 Release에서 `.release` 요구사항을 쓰는지는 7-1 P6 "Release 요구사항"·"Release 앱의 `variant`" 두 항목으로 확인한다(두 문자열이 모두 바이너리에 들어가므로 `strings`로는 확인할 수 없다).
 - 완료 판정: 7-1 P6 통과
 
 ### WO-46: 개발용 데몬 등록 정리
 - 상태: [ ] 대기 · 의존: WO-45 · 충족: R16
-- 변경: 개발 중 DerivedData 경로로 등록된 root 데몬과 에이전트를 Debug 앱에서 `unregister()`하고, `sfltool dumpbtm`에서 사라졌는지 확인한다(8장).
-- 완료 판정: `sfltool dumpbtm`에 DerivedData 경로 항목 없음
+- 변경: 개발 중 `/Applications/Haetae.app`(Debug 사본, Q33)으로 등록된 root 데몬과 에이전트를 그 앱에서 `unregister()`하고, `sfltool dumpbtm`에서 사라졌는지 확인한다(8장). DerivedData 경로 등록은 처음부터 하지 않는다.
+- 완료 판정: `sfltool dumpbtm`에 Debug 빌드 항목과 DerivedData 경로 항목 없음
 
 ## 7. 검증 계획
 
@@ -1111,7 +1114,9 @@ sequenceDiagram
 **P1**
 - [ ] 번들 구성: 빌드 산출물에서 `Contents/MacOS/haetaed`, `Contents/Library/LaunchDaemons/com.10000DOO.haetaed.plist`, `Contents/Library/LaunchAgents/com.10000DOO.Haetae.agent.plist` 3개 존재 — 결과:
 - [ ] 서명: `codesign -dv --verbose=4`로 데몬 `Identifier=com.10000DOO.haetaed`, 앱·데몬 모두 `TeamIdentifier=47XT7DPDLP`, `flags`에 `runtime`. `codesign --verify --deep --strict <app>` 통과 — 결과:
-- [ ] entitlement: `codesign -d --entitlements - <app>`와 데몬 결과에 `get-task-allow` 외 예외 entitlement 없음(Debug는 `get-task-allow`만 허용) — 결과:
+- [ ] entitlement: `codesign -d --entitlements - <app>`와 데몬 결과에 예외 entitlement(`com.apple.security.cs.*`) 없음. Debug에서 허용하는 것: 앱 `get-task-allow`, 데몬 `get-task-allow`·`com.apple.application-identifier`(Xcode가 자동으로 넣음) — 결과:
+- [ ] 빌드 번호 일치(Q28): `plutil -extract CFBundleVersion raw <app>/Contents/Info.plist` = `launchctl plist __TEXT,__info_plist <app>/Contents/MacOS/haetaed`의 `CFBundleVersion` = `HaetaeMinBuild` — 결과:
+- [ ] 등록 출처(Q33): 검증 전에 사용자가 `sudo ditto <빌드한 Haetae.app> /Applications/Haetae.app && sudo chown -R root:wheel /Applications/Haetae.app`를 실행한다. `launchctl print system/com.10000DOO.haetaed`의 프로그램 경로가 `/Applications/Haetae.app/Contents/MacOS/haetaed`이고 `stat -f '%Su %Sp' /Applications/Haetae.app`이 `root drwxr-xr-x`. DerivedData의 앱을 바로 실행하면 등록하지 않고 안내가 뜸 — 결과:
 - [ ] 연결: 승인 뒤 `pgrep -x haetaed`의 소유자가 root이고, 앱 패널 상태가 "연결됨(빌드 N)" — 결과:
 - [ ] XPC 거부: `Tools/xpc-probe/run-probes.sh` → 서명 안 함, ad-hoc, exec-swap 셋 다 "무효화". 사용자 도메인 가짜 서비스에 앱이 연결하지 않음 — 결과:
 - [ ] 데몬 종료: 앱을 메뉴로 종료하고 10초 뒤 `pgrep -x haetaed` 없음 — 결과:
@@ -1141,6 +1146,7 @@ sequenceDiagram
 - [ ] 패턴 팩: 정상 팩 설치 성공, 위조 서명·낮은 버전·형식 불일치는 거부되고 기존 팩 유지 — 결과:
 
 **P6**
+- [ ] 개발용 등록 없음: Debug 사본으로 등록된 데몬·에이전트가 `sfltool dumpbtm`에 없음 ("Release 앱 + Debug 데몬" 항목만 일부러 Debug를 다시 등록해서 확인) — 결과:
 - [ ] 공증: `spctl -a -vv -t install Haetae.pkg` → accepted, `xcrun stapler validate` 통과 — 결과:
 - [ ] Release 요구사항: P1 XPC 거부 항목 + Debug 빌드 앱·이전 빌드 앱이 Release 데몬에 거부됨 — 결과:
 - [ ] Release 앱의 `variant`: Release 앱이 Debug 서명(`get-task-allow`) 데몬에 연결하면 `daemonStatus = .verificationFailed`(앱이 실수로 `.debug` 요구사항을 쓰지 않는지) — 결과:
@@ -1177,13 +1183,13 @@ sequenceDiagram
 - 권한(TCC) 변화 감시는 TCC.db를 읽어야 하는데, root라도 "전체 디스크 접근" 권한이 없으면 못 읽는다. 사용자가 시스템 설정에서 haetaed에 이 권한을 줘야 한다.
 - 데몬은 사용자 세션 밖에서 돌아서 macOS 알림을 직접 못 띄운다. 알림은 메뉴바 앱이 띄운다.
 - 앱 타깃은 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` (`project.pbxproj` Haetae Debug/Release). LLM 추론과 XPC 응답 처리가 메인 액터에 묶이지 않게 `@concurrent`나 별도 actor로 뺀다. 앱 타깃은 `SWIFT_APPROACHABLE_CONCURRENCY = YES`라서 `nonisolated async` 함수는 호출한 쪽 액터(메인)에서 돈다 — `nonisolated`만으로는 벗어나지 못한다. 패키지(Swift 6 모드)는 이 설정이 꺼져 있어, 같은 코드라도 앱 타깃과 패키지 사이를 옮기면 실행 위치가 바뀐다.
-- 두 타깃 모두 `ENABLE_HARDENED_RUNTIME` 설정이 없다 (`grep -c` = 0). 배포(공증) 전에 켜야 한다.
+- 두 타깃 모두 `ENABLE_HARDENED_RUNTIME = YES`다(WO-3). 예외 entitlement는 넣지 않는다(3-7). Release 구성에는 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`가 있어 `get-task-allow`가 들어가지 않는다(Q35, 2026-11-20 Release 빌드로 확인). Release 빌드는 디버거를 붙일 수 없다.
 - 두 타깃에 `"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-"`가 남아 있고, 이 맥 키체인의 서명 인증서가 0개다 (2026-11-19). 빌드 뒤 `codesign -dv`로 TeamIdentifier가 찍히는지 확인해야 D8 서명 검사가 동작한다.
 - 이 맥은 방화벽이 꺼져 있다 (`socketfilterfw --getglobalstate` → disabled). 3-5 ⑤ 규칙상 처음부터 꺼진 방화벽은 "낮음"이고, 켰다가 끄면 "높음"이어야 정상이다.
 - 서명 요구사항의 `info[CFBundleVersion] >=`는 숫자 비교다(2026-11-19 WO-2 리뷰에서 `codesign -v -R`로 실측: `10 >= 9` 통과, `2 >= 10` 거부. XPC 동적 검사에서는 확인 안 함). 숫자가 아닌 값도 통과할 수 있으니 `CFBundleVersion`은 정수만 쓴다.
 - Personal Team에서 유료 팀으로 바꾸면 팀 ID가 바뀔 수 있다. 요구사항 문자열의 팀 ID·최소 빌드는 빌드 설정에서 주입한다.
 - 앱을 LaunchAgent로 띄우므로(D28), Finder에서 다시 열었을 때 두 개가 뜨지 않게 단일 실행을 확인해야 한다.
-- 개발 중 DerivedData 경로로 등록한 root 데몬은 개발이 끝나면 앱에서 `unregister()`한다. 사용자 쓰기 가능 경로에서 root로 도는 상태라서다.
+- **개발 중에도 데몬은 root 소유 사본에서만 등록한다(Q33).** DerivedData(사용자가 쓸 수 있는 폴더)의 앱에서는 `register()`하지 않는다 — 같은 사용자 권한의 악성코드가 번들 안 launchd plist나 실행 파일을 바꿔 root 권한을 얻을 수 있어서다. 절차: 빌드 → `sudo ditto <빌드한 Haetae.app> /Applications/Haetae.app && sudo chown -R root:wheel /Applications/Haetae.app` → `/Applications/Haetae.app`을 실행해 등록. sudo는 사용자가 직접 실행한다(에이전트는 암호를 넣을 수 없다 — 사용자에게 요청). 다시 빌드하면 같은 명령으로 덮어쓴다. 앱은 번들이 사용자 쓰기 가능하면 `register()`를 하지 않고 패널에 안내한다(WO-5).
 - mlx-community 변환본은 라이선스 메타데이터가 틀려 있다(Gemma 4를 `gemma`로 표기). 앱의 라이선스 고지는 원본 기준 Apache 2.0으로 한다.
 - 서명 요구사항 API가 내부에서 audit token을 쓰는지는 문서에 없다. 3-7 검증 항목으로 실제 동작을 확인한다.
 - 두 타깃은 `SWIFT_VERSION = 6.0`(Q21, 2026-11-19). 큐 여러 개가 건드리는 상태(WO-4 연결 카운터, WO-5 `DaemonClient` continuation)는 컴파일러가 data race를 오류로 잡는다 — `@unchecked Sendable`·`nonisolated(unsafe)`로 끄지 말고 actor나 잠금으로 푼다.
@@ -1193,7 +1199,7 @@ sequenceDiagram
 - authd "authorizing right" 로그 형식은 연구 문서 기준이며 이 맥 최근 1시간에서는 보이지 않았다(WO-17에서 실제 출력으로 확인). `launchctl print-disabled system`에는 공유 서비스 항목이 보이지 않았다(WO-38은 다른 방법 사용).
 - 앱 타깃은 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`라서 SourceKit이 두 타깃 파일을 한 모듈로 보고 `'main' attribute` 같은 가짜 오류를 낼 수 있다. 판단은 `xcodebuild` 결과로 한다.
 - 테스트 WO는 구현 WO와 다른 에이전트가 `paseo-handoff`로 맡는다. 테스트 에이전트는 구현 코드를 고치지 않고, 실패 사유를 해당 구현 WO에 기록한다.
-- Phase 1 시작 전 준비 (서명): 2026-11-19 21:06 사용자 빌드는 성공했지만 `Signing Identity: "Sign to Run Locally"`(ad-hoc, `TeamIdentifier=not set`)로 서명됐다. 원인은 두 타깃의 `"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-"`(`project.pbxproj` Debug/Release). 키체인에는 만료된 회사 인증서 2개뿐이고 유효한 인증서는 0개, Xcode 계정에는 Personal Team 47XT7DPDLP가 로그인돼 있다. XPC 서명 검증(3-7)은 팀 서명이 있어야 시험할 수 있으므로, Xcode에서 `Haetae`·`haetaed` 타깃 → Signing & Capabilities → Signing Certificate를 "Development"로 바꾸고 빌드해 Apple Development 인증서를 만든다. 확인: `codesign -dv`의 `TeamIdentifier=47XT7DPDLP`. → **완료(2026-11-19 사용자 처리)**: 두 타깃 `CODE_SIGN_IDENTITY = "Apple Development"`, 빌드 산출물 `Authority=Apple Development`, `TeamIdentifier=47XT7DPDLP`, 유효 인증서 1개. hardened runtime은 아직 꺼짐(`flags=0x0`, WO-3에서 켬).
+- Phase 1 시작 전 준비 (서명): 2026-11-19 21:06 사용자 빌드는 성공했지만 `Signing Identity: "Sign to Run Locally"`(ad-hoc, `TeamIdentifier=not set`)로 서명됐다. 원인은 두 타깃의 `"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-"`(`project.pbxproj` Debug/Release). 키체인에는 만료된 회사 인증서 2개뿐이고 유효한 인증서는 0개, Xcode 계정에는 Personal Team 47XT7DPDLP가 로그인돼 있다. XPC 서명 검증(3-7)은 팀 서명이 있어야 시험할 수 있으므로, Xcode에서 `Haetae`·`haetaed` 타깃 → Signing & Capabilities → Signing Certificate를 "Development"로 바꾸고 빌드해 Apple Development 인증서를 만든다. 확인: `codesign -dv`의 `TeamIdentifier=47XT7DPDLP`. → **완료(2026-11-19 사용자 처리)**: 두 타깃 `CODE_SIGN_IDENTITY = "Apple Development"`, 빌드 산출물 `Authority=Apple Development`, `TeamIdentifier=47XT7DPDLP`, 유효 인증서 1개. hardened runtime은 WO-3에서 켰다(`flags=0x10000(runtime)`).
 - 작업 도구 (Q20, 2026-11-19 설치): swift-lsp·clangd MCP 삭제, `swift-concurrency@swift-concurrency-agent-skill` 플러그인(user), Peekaboo 4.9.9(`brew install openclaw/tap/peekaboo`, MCP `peekaboo mcp`, user — npx 대신 brew 바이너리로 고정), codegraph 인덱스(`.codegraph/`), `xcode-build-server config -project Haetae.xcodeproj -scheme Haetae`로 `buildServer.json` 생성(`.gitignore`에 추가, 이 맥 경로가 들어 있음). Peekaboo는 Claude Code를 띄우는 앱(이 맥에서는 Paseo.app)에 손쉬운 사용 권한이 필요하다. 새 MCP·플러그인은 Claude Code를 다시 시작해야 잡힌다.
 - WO-1 빌드용 파일(`HaetaeKit/Sources/<타깃>/<타깃>.swift`, 주석만 있음)은 그 타깃에 첫 실제 파일을 넣는 WO가 지운다: WO-2(`HaetaeShared`), WO-8(`HaetaeChecks`), WO-13(`HaetaeAppCore`). 모듈과 이름이 같은 타입은 만들지 않는다(`HaetaeShared.Finding` 같은 모듈 한정 이름이 깨짐).
 - 프로젝트 수준 `MACOSX_DEPLOYMENT_TARGET`은 27.0이고 두 타깃이 15.0으로 덮어쓴다. 새 타깃을 만들면 27.0을 물려받으니 그 타깃에도 15.0을 적는다.
@@ -1203,12 +1209,16 @@ sequenceDiagram
 - XPC 계약(`Finding`, `CollectResult`) 바꾸는 규칙: 필드 추가는 항상 `T?`로 한다(기본값만 있는 필드도 키가 없으면 옛 쪽 디코딩이 실패한다). 필드 삭제·타입 변경·enum case 추가·한도 상향일 때만 `schemaVersion`을 올린다. `RiskLevel`에 값을 추가하면 옛 쪽은 응답 전체를 못 읽는다. `schemaVersion`·`daemonBuild` 키는 스키마를 올려도 이름과 타입을 바꾸지 않는다(`decodeHeader`가 읽는 값). 키 이름은 디스크 저장 형식(`risks.json`, ledger)이기도 하다.
 - XPC로 받은 데이터는 `CollectResult.decodeValidated`·`decodeHeader`·`HaetaeXPC.decodeAck`로만 푼다. `JSONWire.decode`는 `package` 접근이라 패키지 안에서만 보인다 — 패키지 안(`CollectCoordinator`)에서도 XPC 입력에는 쓰지 않는다.
 - `JSONWire` 날짜는 초 단위다(소수 초 버림). `Finding`의 `==`·해시는 `observedAt`을 포함하므로 같은 건인지 볼 때는 `fingerprint`를 쓴다.
-- `HAETAE_TEAM_ID`는 `$(DEVELOPMENT_TEAM)`에서 온다. 유료 팀으로 바꿀 때는 `DEVELOPMENT_TEAM`만 바꾼다(WO-45).
+- `HAETAE_TEAM_ID`는 `$(DEVELOPMENT_TEAM)`에서 온다. 유료 팀으로 바꿀 때는 `DEVELOPMENT_TEAM`만 바꾼다(두 타깃 × Debug·Release, 4곳, WO-45).
+- 빌드 번호는 프로젝트 수준 `CURRENT_PROJECT_VERSION` 하나만 쓴다(Q28 — 앱과 데몬 번호가 다르면 Release에서 연결이 안 된다. Debug 요구사항에는 빌드 조건이 없어 Release 전까지 드러나지 않는다). Xcode General 탭의 Build 칸과 `agvtool`은 쓰지 않는다(타깃 수준에 값을 따로 만든다).
+- agent를 등록한 뒤(WO-5~)에는 Xcode Run으로 뜬 인스턴스가 agent 인스턴스에 양보하고 바로 끝나서 브레이크포인트가 안 걸린다. 디버깅은 스킴 Run ▸ Info에서 "Wait for the executable to be launched"를 켜고 `launchctl kickstart -k gui/$(id -u)/com.10000DOO.Haetae.agent`로 다시 띄워 붙는다. Xcode Stop은 SIGKILL이라 launchd가 다시 띄운다 — 완전히 멈추려면 패널의 "종료"를 쓴다(이 프로젝트에서는 아직 확인 안 함).
+- Debug 산출물에는 서명 인증서 이름(Apple ID 메일)과 로컬 절대 경로(LC_RPATH)가 들어 있다. Debug 빌드를 밖에 공유하지 않는다. `.gitignore` 대상이라 커밋되지는 않는다.
+- 되돌리기 방지(`highest-build`)는 Release 데몬만 쓴다(Q34). Debug 데몬은 이 파일을 보지 않으므로 P6 테스트 뒤에도 그대로 돈다.
 - `HaetaeShared`에는 앱과 데몬이 둘 다 쓰는 XPC 계약(모델·프로토콜·한도·인코딩)만 넣는다. 한쪽만 쓰는 것은 그쪽 타깃(`HaetaeAppCore`/`HaetaeChecks`)에 둔다.
 - 패키지에는 SwiftPM 리소스 파일을 두지 않는다(테스트 픽스처만 예외). 데이터는 Swift 문자열로 내장한다 — haetaed는 앱 번들 안으로 복사되는 명령줄 도구라 리소스 번들이 따라오지 않는다.
 - 외부 패키지가 처음 들어오는 WO-22부터 7-1 공통 `xcodebuild` 명령에 `-onlyUsePackageVersionsFromResolvedFile`를 붙인다(D16, T22). 의존이 0개인 지금은 `Package.resolved`가 없어 붙이지 않는다.
-- WO-3 Copy Files: 문서의 `dstSubfolderSpec` 숫자 표기와 Xcode 27이 이 파일에 쓰는 형식(`dstSubfolder = None;`)이 다를 수 있다(확실하지 않음). 기존 단계 형식을 따르고 완료 판정의 `find`로 확인한다. 템플릿이 만든 빈 man page Copy Files 단계는 WO-3에서 지운다.
-- WO-4에서 `Bundle.main.bundleURL`을 로그로 확인한다 — haetaed가 `Contents/MacOS/` 안에서 돌면 `Bundle.main`이 `Haetae.app`일 수 있다(확실하지 않음, `daemonBuild` 읽는 위치에 영향).
+- pbxproj Copy Files 표기(확인됨, WO-3): Xcode 27은 `dstSubfolder = Executables` / `Wrapper` / `None`(+ `dstPath`)을 쓴다. 옛 `dstSubfolderSpec` 숫자는 쓰지 않는다. WO-43(Sparkle)도 이 형식을 따른다.
+- 데몬의 `Bundle.main`(확인됨, WO-3 리뷰에서 실측): `bundleURL`은 `Haetae.app`, `executableURL`과 `infoDictionary`는 데몬 자신의 것(내장 `__info_plist`)이다. 그래서 `Bundle.main.infoDictionary`로 자기 값을 읽는 것은 맞고, `bundleURL/Contents/Info.plist`를 읽으면 앱의 값이 나온다.
 - `.gitignore`에 서명 키·인증 파일(`*.p8`, `*.p12`, `*.pem`, `*.key`, `.env` 등)과 릴리스 산출물(`*.pkg`, `*.xcarchive` 등) 패턴이 있다(WO-1 리뷰). 그래도 키는 저장소 밖에 둔다.
 - `HaetaeKit`은 외부 의존이 없어 `Package.resolved`가 아직 생기지 않는다. 외부 패키지(MLX, Sparkle)를 앱 타깃에 넣으면 `Haetae.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`가 생기니 그때 커밋한다. `.build/`·`.swiftpm/`·`.codegraph/`(이 맥 전용 인덱스)는 `.gitignore`로 제외(WO-1).
 - Xcode가 패키지 library product마다 스킴(`HaetaeShared`·`HaetaeChecks`·`HaetaeAppCore`)을 자동으로 보여준다. 빌드·검증은 `Haetae`·`haetaed` 스킴으로만 한다.
@@ -1252,6 +1262,9 @@ sequenceDiagram
 | Q30 | 여러 사용자가 로그인한 상태의 업데이트 (D15·D20 보강) | 다른 사용자의 옛 앱이 연결을 쥐고 있으면 옛 데몬이 안 꺼져서 새 앱이 계속 옛 데몬에 붙음. 1) 데몬이 디스크의 자기 번들 빌드가 더 높으면 응답 뒤 스스로 종료 + 데몬이 더 새것이면 앱이 스스로 재실행 + 7-1 P6에 두 사용자 업데이트 항목 추가 — Claude 추천 / 2) `.pkg` postinstall에서 데몬 종료만 / 3) 그대로(단일 사용자 가정) |1번 (2026-11-19) — D20·WO-5·WO-12·7-1 P6 반영 |
 | Q31 | `scanGap`(검사 공백) 표시 조건 (WO-12·40) | 지금 계산식은 "직전 검사 뒤 120분 초과"라서 밤새 잠자기, 메뉴 "종료" 뒤 다음 날 실행, 재부팅에도 "N분 동안 검사하지 못했어요(비정상 종료)"가 뜸. 1) 직전 연결이 `markUserQuit` 없이 끝났거나 "정지 의심"이 기록됐을 때만 채우고, 정지 의심 시간은 잠자기 동안 멈추는 시계(`SuspendingClock`)로 재고, 문구에서 "(비정상 종료)"를 뺌 — Claude 추천 / 2) 그대로 |1번 (2026-11-19) — WO-12·WO-40 반영 |
 | Q32 | 강제 업데이트 방식 (Q28에서 이어짐, Q9·D22·D31과 충돌) | Q9는 "자동 확인, 설치는 사용자가 누름"이고, D31은 `.pkg` root 설치라 업데이트 때 관리자 암호가 필요해 완전 무인 설치는 안 됨. |1번 (2026-11-19): 업데이트 창을 닫거나 건너뛸 수 없게, 검사는 계속, 패널에 "업데이트 필요"(높음). 최소 빌드 = 자기 빌드. D22·3-7·WO-3·43·45·7-1 P6 반영. Q9의 "설치는 사용자가 누름"은 "암호 입력은 사용자가, 건너뛰기는 불가"로 바뀜 |
+| Q33 | 개발 중 데몬을 어디서 등록할지 | 지금은 DerivedData(사용자가 쓸 수 있는 폴더)의 앱에서 root 데몬을 등록함. 같은 사용자 권한의 악성코드가 번들 안 파일을 바꿀 수 있음. 1) 세션이 끝날 때마다 등록 해제(8장에 반영함) — 번거롭지 않음, 위험 구간은 작업 중으로 줄어듦, Claude 추천 / 2) 등록할 때는 항상 `/Applications`에 root 소유로 복사한 사본을 씀(`sudo ditto` + `sudo chown`) — 더 안전하지만 빌드할 때마다 암호 입력 |2번 (2026-11-20): 항상 `/Applications`의 root 소유 사본에서만 등록. 8장·WO-5·WO-12·WO-44·WO-46·7-1 P1 반영. sudo는 사용자가 실행 |
+| Q34 | 되돌리기 방지(D20)를 Release에만 적용할지 | Debug와 Release가 같은 root 폴더의 `highest-build`를 씀. Release를 한 번 설치하면 그보다 낮은 Debug 데몬은 모든 요청을 거부함. 1) Release에서만 검사 — 개발이 막히지 않음, Claude 추천 / 2) 그대로 두고 필요할 때 파일을 지움(sudo) |1번 (2026-11-20): Release에서만 검사. D20·WO-12·WO-19·8장 반영 |
+| Q35 | Release 빌드 설정에 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO` | Release에서 `get-task-allow`가 빠지는 것을 지금은 export 단계에 맡김(확실하지 않음). 안 빠져도 서명 요구사항과 공증이 막아 연결 실패로 끝남. 빌드 설정 변경이라 사용자 결정. 1) WO-45에서 export 뒤 확인만(지금 그대로) — Claude 추천 / 2) 두 타깃 Release에 설정 추가 |2번 (2026-11-20): 두 타깃 Release에 설정 추가, Release 빌드로 확인. 8장·WO-45 반영 |
 
 ## 10. 작업 로그 (append-only)
 
@@ -1424,3 +1437,13 @@ sequenceDiagram
 - 한 일: WO-2 재리뷰(별도 에이전트) 지적 8건 반영. `HaetaeXPCError`를 `CustomNSError`로, `CollectResult.encodeValidated()` 추가, `decodeHeader` 음수 빌드 거부.
 - 알아낸 것: Q28(같은 빌드끼리만 연결)을 걸면 빌드가 다를 때 응답이 오지 않아 응답의 `daemonBuild`로는 불일치를 알 수 없음. 확인 안 된 것 — XPC 클라이언트 쪽 서명 검사 시점, 업데이트 뒤 옛 프로세스의 동적 서명 검사 결과(7-1 P6).
 - 바뀐 결정: D20 — 빌드 불일치 판단을 디스크의 자기 번들 빌드로(Q28·Q30 결정은 그대로, 방법만 변경). R15 — Q32에 맞춰 완료 기준 수정.
+
+### 2026-11-19 — Claude (2번째 세션, 11차)
+- 한 일: WO-2 커밋 2개 push. WO-3 구현(`Support/` plist 4개, Copy Files 3개, 타깃 의존, hardened runtime, 프로젝트 수준 빌드 번호·팀 ID) → 3개 관점 리뷰 → 지적 반영. 9장에 Q33~Q35 추가.
+- 알아낸 것: Xcode 27 pbxproj의 Copy Files 표기는 `dstSubfolder = Executables/Wrapper`. 데몬의 `Bundle.main.bundleURL`은 앱 번들이고 `infoDictionary`는 데몬 내장 plist. Xcode가 명령줄 도구에 `com.apple.application-identifier`를 자동으로 넣음. `pkgbuild` 기본값은 재배치 가능 번들.
+- 바뀐 결정: 없음(Q33~Q35 대기)
+
+### 2026-11-20 — Claude (2번째 세션, 12차)
+- 한 일: Q33~Q35 사용자 결정 반영. 두 타깃 Release에 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO` 추가.
+- 알아낸 것: 없음
+- 바뀐 결정: 개발 중에도 데몬은 `/Applications`의 root 소유 사본에서만 등록(Q33). D20 되돌리기 방지는 Release 전용(Q34).
