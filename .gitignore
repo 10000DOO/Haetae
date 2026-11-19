@@ -155,3 +155,19 @@ playground.xcworkspace
 buildServer.json
 # CodeGraph local index (machine-local tooling)
 .codegraph/
+# Signing keys and credentials (public repo)
+*.p8
+*.p12
+*.pem
+*.key
+*.provisionprofile
+.env
+.env.*
+*private_key*
+# Release/test artifacts
+*.xcarchive
+*.xcresult
+*.trace
+*.pkg
+*.dmg
+.claude/settings.local.json
