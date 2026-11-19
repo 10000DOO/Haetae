@@ -6,8 +6,27 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		70A4FD0130AEEA0100EF4C41 /* HaetaeShared in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0130AEEA0000EF4C41 /* HaetaeShared */; };
+		70A4FD0230AEEA0100EF4C41 /* HaetaeAppCore in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0230AEEA0000EF4C41 /* HaetaeAppCore */; };
+		70A4FD0330AEEA0100EF4C41 /* HaetaeShared in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0330AEEA0000EF4C41 /* HaetaeShared */; };
+		70A4FD0430AEEA0100EF4C41 /* HaetaeChecks in Frameworks */ = {isa = PBXBuildFile; productRef = 70A4FD0430AEEA0000EF4C41 /* HaetaeChecks */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		70A4FC4630AEE99800EF4C41 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolder = None;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		70A4FC3630AEE96700EF4C41 /* Haetae.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Haetae.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		70A4FC4830AEE99800EF4C41 /* haetaed */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = haetaed; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,12 +35,26 @@
 			path = Haetae;
 			sourceTree = "<group>";
 		};
+		70A4FC4930AEE99800EF4C41 /* haetaed */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = haetaed;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		70A4FC3330AEE96700EF4C41 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				70A4FD0130AEEA0100EF4C41 /* HaetaeShared in Frameworks */,
+				70A4FD0230AEEA0100EF4C41 /* HaetaeAppCore in Frameworks */,
+			);
+		};
+		70A4FC4530AEE99800EF4C41 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				70A4FD0330AEEA0100EF4C41 /* HaetaeShared in Frameworks */,
+				70A4FD0430AEEA0100EF4C41 /* HaetaeChecks in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -31,6 +64,7 @@
 			isa = PBXGroup;
 			children = (
 				70A4FC3830AEE96700EF4C41 /* Haetae */,
+				70A4FC4930AEE99800EF4C41 /* haetaed */,
 				70A4FC3730AEE96700EF4C41 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				70A4FC3630AEE96700EF4C41 /* Haetae.app */,
+				70A4FC4830AEE99800EF4C41 /* haetaed */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -60,9 +95,35 @@
 				70A4FC3830AEE96700EF4C41 /* Haetae */,
 			);
 			name = Haetae;
+			packageProductDependencies = (
+				70A4FD0130AEEA0000EF4C41 /* HaetaeShared */,
+				70A4FD0230AEEA0000EF4C41 /* HaetaeAppCore */,
+			);
 			productName = Haetae;
 			productReference = 70A4FC3630AEE96700EF4C41 /* Haetae.app */;
 			productType = "com.apple.product-type.application";
+		};
+		70A4FC4730AEE99800EF4C41 /* haetaed */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 70A4FC4C30AEE99800EF4C41 /* Build configuration list for PBXNativeTarget "haetaed" */;
+			buildPhases = (
+				70A4FC4430AEE99800EF4C41 /* Sources */,
+				70A4FC4530AEE99800EF4C41 /* Frameworks */,
+				70A4FC4630AEE99800EF4C41 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				70A4FC4930AEE99800EF4C41 /* haetaed */,
+			);
+			name = haetaed;
+			packageProductDependencies = (
+				70A4FD0330AEEA0000EF4C41 /* HaetaeShared */,
+				70A4FD0430AEEA0000EF4C41 /* HaetaeChecks */,
+			);
+			productName = haetaed;
+			productReference = 70A4FC4830AEE99800EF4C41 /* haetaed */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -77,6 +138,9 @@
 					70A4FC3530AEE96700EF4C41 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					70A4FC4730AEE99800EF4C41 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = 70A4FC3130AEE96700EF4C41 /* Build configuration list for PBXProject "Haetae" */;
@@ -88,12 +152,16 @@
 			);
 			mainGroup = 70A4FC2D30AEE96700EF4C41;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 70A4FC3730AEE96700EF4C41 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				70A4FC3530AEE96700EF4C41 /* Haetae */,
+				70A4FC4730AEE99800EF4C41 /* haetaed */,
 			);
 		};
 /* End PBXProject section */
@@ -108,6 +176,11 @@
 
 /* Begin PBXSourcesBuildPhase section */
 		70A4FC3230AEE96700EF4C41 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		70A4FC4430AEE99800EF4C41 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -238,18 +311,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.Haetae;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -268,18 +343,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.10000DOO.Haetae;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -288,6 +365,34 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		70A4FC4D30AEE99800EF4C41 /* Debug configuration for PBXNativeTarget "haetaed" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		70A4FC4E30AEE99800EF4C41 /* Release configuration for PBXNativeTarget "haetaed" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 47XT7DPDLP;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -312,7 +417,45 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		70A4FC4C30AEE99800EF4C41 /* Build configuration list for PBXNativeTarget "haetaed" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				70A4FC4D30AEE99800EF4C41 /* Debug configuration for PBXNativeTarget "haetaed" */,
+				70A4FC4E30AEE99800EF4C41 /* Release configuration for PBXNativeTarget "haetaed" */,
+			);
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HaetaeKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		70A4FD0130AEEA0000EF4C41 /* HaetaeShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */;
+			productName = HaetaeShared;
+		};
+		70A4FD0230AEEA0000EF4C41 /* HaetaeAppCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */;
+			productName = HaetaeAppCore;
+		};
+		70A4FD0330AEEA0000EF4C41 /* HaetaeShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */;
+			productName = HaetaeShared;
+		};
+		70A4FD0430AEEA0000EF4C41 /* HaetaeChecks */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 70A4FD0030AEEA0000EF4C41 /* XCLocalSwiftPackageReference "HaetaeKit" */;
+			productName = HaetaeChecks;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 70A4FC2E30AEE96700EF4C41 /* Project object */;
 	validationLevel = 1;
