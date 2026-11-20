@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-20 · 브랜치: `main` · 다음 액션: WO-8 리뷰 반영(별도 에이전트 2개가 리뷰 중) → `[x]` → WO-9. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 시작함(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-20 · 브랜치: `main` · 다음 액션: WO-9(`SafeFileReader`·`UserDirectory`). Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 시작함(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -741,20 +741,22 @@ sequenceDiagram
 ### Phase 2 — 검사 엔진, 핵심 검사, 규칙 판정, 알림
 
 ### WO-8: `CommandRunner` — 안전한 CLI 실행 (D26)
-- 상태: [~] 진행중 — 2026-11-20: 구현함, `swift build` 경고 0, 실제 명령 13가지로 동작 확인(상대 경로 거부, 타임아웃 SIGTERM→SIGKILL, 상한 자르기, 환경 고정, 취소, 직렬화). 별도 에이전트 2개(보안, 설계·동시성) 리뷰 중 — 반영 뒤 `[x]`. 지시와 다르게 한 것(리뷰에서 타당한지 확인): `timeout`은 `Duration`, 인자에 NUL이 있으면 throw, `maxBytes`는 스트림별, 취소되면 바로 SIGKILL, 프로세스가 끝난 뒤 파이프는 2초만 더 기다리고 `truncated`로 표시, 손자 프로세스는 죽이지 않음
+- 상태: [x] 완료 (2026-11-20) — `swift build` 경고 0. 실제 명령 22가지로 동작 확인(경로·NUL 거부, SIGTERM→SIGKILL, 상한 자르기, 환경 고정, 시그널 구분, 손자 정리, 늦게 쓰는 자식의 출력 보존, 취소, 직렬화, fd 누수 없음). 단위 테스트는 WO-19
 - 의존: WO-1
 - 충족: R1
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/CommandRunner.swift`
 - 변경:
-  1. `func run(_ executable: String, _ args: [String], timeout: TimeInterval, maxBytes: Int) async throws -> CommandOutput`. `CommandOutput`에는 `stdout: Data`, `stderr: Data`, `exitCode`, `truncated: Bool`, `timedOut: Bool`가 들어간다.
-  2. `executable`은 `/`로 시작하는 절대 경로만 받는다(아니면 throw). `Process.executableURL`, `arguments` 배열을 쓰고 셸은 쓰지 않는다. `environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]`
+  1. `func run(_ executable: String, _ args: [String], timeout: Duration, maxBytes: Int) async throws -> CommandOutput`. `CommandOutput`에는 `stdout: Data`, `stderr: Data`, `exitCode`, `terminatedBySignal: Bool`, `truncated: Bool`, `timedOut: Bool`가 들어간다. `maxBytes`는 스트림별 상한이다. 성공 판정은 `!timedOut && !terminatedBySignal && exitCode == 0`.
+  2. `executable`은 SIP가 보호하는 경로(`/usr/bin/`, `/bin/`, `/usr/sbin/`, `/sbin/`, `/usr/libexec/`) 아래의 절대 경로만 받고 `..` 성분은 거부한다(바이트 단위로 검사). `/System/`은 넣지 않는다 — `/System/Volumes/Data` 아래는 사용자가 쓸 수 있다. `/System/Library/` 아래 도구가 필요한 WO는 그 경로만 좁혀서 추가한다(아니면 `CommandError.executableNotAllowed`). 인자에 NUL이 있으면 `CommandError.nulInArgument`(Foundation이 ObjC 예외를 던져 데몬이 죽는 것을 막는다). `Process.executableURL`, `arguments` 배열을 쓰고 셸은 쓰지 않는다. `environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]`
   3. stdout·stderr를 `readabilityHandler`로 비동기로 비우고 `maxBytes`에서 자른다(`truncated = true`). 넘친 뒤에도 파이프는 계속 비운다(교착 방지).
-  4. 타임아웃이면 `terminate()` 후 2초 뒤에도 살아 있으면 `kill(pid, SIGKILL)`
-  5. 동시 실행은 actor로 직렬화한다
+  4. 타임아웃이면 `terminate()` 후 2초 뒤에도 살아 있으면 SIGKILL, 그 2초 뒤에도 안 끝나면 포기하고 돌아온다(`exitCode = -1`). 자식이 자기 프로세스 그룹의 리더로 확인되면(`getpgid(pid) == pid`) SIGKILL은 그룹에 보낸다. 프로세스가 끝난 뒤 파이프가 안 닫히면 2초만 더 기다리고 `truncated = true`. 돌아오기 직전에 그룹에 SIGKILL을 한 번 더 보내 남은 손자 프로세스를 정리한다(리더가 끝난 뒤에도 출력을 쓰는 자식은 EOF까지 기다려 주므로 출력이 조용히 잘리지 않는다). 돌아오기까지 최대 `timeout` + 6초. 호출한 Task가 취소되면 바로 SIGKILL하고 `CancellationError`
+  5. 동시 실행은 actor로 직렬화한다(actor는 `await` 사이에 다른 호출을 받으므로 대기열을 직접 둔다). 직렬화는 인스턴스 단위다 — 데몬 전체에서 하나만 만든다(WO-12)
   6. `HaetaeKit/Sources/HaetaeChecks/HaetaeChecks.swift`(WO-1 빌드용 파일) 삭제
   7. strict memory safety는 이미 모든 타깃에 켜져 있다(Q39). `CommandRunner`에서 포인터를 쓰게 되면 `unsafe`를 붙이고, 가능하면 `Span`이나 버퍼 포인터로 범위를 좁힌다.
 - 금지: `/bin/sh -c`, `zsh -c`, 상대 경로 금지
 - 완료 판정: `swift build` 성공. 테스트는 WO-19.
+- 리뷰 (2026-11-20, 별도 에이전트 2개: 보안, 설계·동시성): Critical·High 0. 조치 — 손자 프로세스가 root 고아로 남던 것(그룹 SIGKILL), 시그널 종료와 종료 코드 구분(`terminatedBySignal`), `availableData`의 ObjC 예외 가능성(`read(2)` 직접 호출, `unsafe` 1곳), 실행 경로를 SIP 보호 경로로 제한, NUL 가드 주석 정정, 문서 주석(`--` 규칙, 최대 시간, 대기 중 취소 시점). WO 지시와 다르게 한 것(`Duration`, NUL throw, 스트림별 `maxBytes`, 취소 시 SIGKILL, drain 2초)은 두 리뷰 모두 타당하다고 판단. 그대로 둔 것 — `isRunning` 확인과 `kill` 사이의 틈(pid가 한 바퀴 돌아야 해서 실제 위험 없음), `truncated`가 "상한 넘음"과 "파이프가 안 닫힘"을 한 값으로 묶는 것(보수적인 쪽), 그룹을 빠져나간(`setsid`) 손자는 못 죽임. 리뷰어 실측: fd 상속 없음, 300회 실행에 fd·좀비 누수 없음, 64KB 넘는 출력에 교착 없음. `launchctl asuser`가 uid를 바꾸지 않는다는 사실은 Q40으로 올림.
+- 재리뷰 (2026-11-20, 보안 리뷰어): 앞선 지적은 모두 해결. 새 지적 2건 조치 — `/System/` 접두어로 `/System/Volumes/Data/…`의 사용자 파일이 실행되던 것(접두어 삭제), 리더가 끝나자마자 그룹을 죽여 늦게 쓰는 자식의 출력이 `truncated = false`인 채 잘리던 것(정리를 루프가 끝난 뒤로 옮김). 함께 고친 것 — `..` 검사를 바이트 단위로, 읽기 오류는 `truncated`로 표시, 쓰이지 않는 EAGAIN 분기 삭제. 이 마지막 수정분은 구현 쪽이 시험만 했고 별도 에이전트가 다시 보지는 않았다. 확인 못 한 것: SIGKILL로도 안 죽는 프로세스(포기 경로)는 sudo 없이 재현할 수 없음.
 
 ### WO-9: `SafeFileReader`와 `UserDirectory` (D25)
 - 상태: [ ] 대기
@@ -789,7 +791,7 @@ sequenceDiagram
 - 충족: R1, R19
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/` — `SecurityCheck.swift`, `CheckContext.swift`, `CheckRunner.swift`, `CheckRegistry.swift`, `SecretMasker.swift`, `PatternStore.swift`(읽기 부분), `DefaultPatterns.swift`(기본 팩 JSON을 raw 문자열로 내장)
 - 변경:
-  1. `protocol SecurityCheck: Sendable { var id: String { get }; var timeout: TimeInterval { get }; var needsBaseline: Bool { get }; func run(_ ctx: CheckContext) async throws -> CheckResult }`, `CheckResult { findings: [Finding]; newBaseline: Data? }`
+  1. `protocol SecurityCheck: Sendable { var id: String { get }; var timeout: Duration { get }; var needsBaseline: Bool { get }; func run(_ ctx: CheckContext) async throws -> CheckResult }`, `CheckResult { findings: [Finding]; newBaseline: Data? }`
   2. `CheckContext`: `baseline: Data?`(첫 실행이면 nil), `isFirstRun: Bool`, `patterns: JSONValue`(팩에서 자기 `checkID` 구역), `users: [UserRecord]`, `reader: SafeFileReader`, `runner: CommandRunner`, `since: Date?`(마지막 성공 시각)
   3. `CheckRunner.runAll(callerUID:) async -> CollectResult`: `CheckRegistry.all`을 순서대로 실행한다. 검사마다 `withTimeout`을 건다. 실패·타임아웃이면 기준값을 갱신하지 않고, `checkID = "haetae.check-failure"`, `ruleLevel = .medium`인 Finding을 만들고 `failedChecks`에 넣는다. 같은 검사가 연속 3번 실패하면 `.high`로 올린다. 성공하면 `newBaseline`을 **pending 기준값**으로 저장한다(확정은 앱이 ack했을 때 — D24, WO-12 2번). `lastSuccess`는 그 실행의 Finding이 ledger pending에 저장된 **뒤에** 갱신한다. 먼저 갱신하면 검사 도중 데몬이 꺼졌을 때(앱이 죽으면 5초 뒤 `exit(0)`, 새 빌드 종료, SIGKILL) 그 구간을 다시 보지 못해 탐지를 영구히 잃는다(같은 사용자 권한의 악성코드가 앱을 죽이는 것만으로 가능). 도중에 끊기면 다음 실행이 같은 구간을 다시 본다. `runAll` 전체에 상한을 둔다(값은 이 WO에서 실측으로 정하고 `HaetaeLimits`에 넣는다 — 앱의 `collect` 타임아웃이 이 값에 맞춰진다, WO-5). 넘으면 남은 검사는 타임아웃 실패로 처리한다. `observedAt`은 `CheckRunner`가 실행 시각(`Date()`) 하나로 채운다 — 파일·로그 시각은 넣지 않는다(필요하면 evidence에). 범위(1970-01-01…9999-12-31 UTC) 밖이면 `validate()`가 응답 전체를 거부하므로, 파일 시각을 넣으면 `touch -t 1960…` 한 번으로 그 회차 감시를 막을 수 있다. 모든 Finding은 `SecretMasker`와 `HaetaeLimits`(evidence·title 길이, 검사별 개수)를 거친다. 길이는 Unicode scalar 수로 자르고 "…(잘림)" 같은 꼬리까지 포함해 상한 이하여야 한다(넘으면 앱이 응답 전체를 거부함). 검사별 개수를 넘으면 수준 높은 것부터 남긴다. `runAll` 결과는 `CollectResult.validate()`를 통과해야 한다. 마지막에 `ledger.filterNew`와 `ledger.resolved`를 적용한다. 동시 실행은 1개만 하고, 실행 중에 온 **같은 `callerUID`** 요청만 같은 결과를 기다리게 합친다. 다른 사용자는 앞 실행이 끝난 뒤 자기 범위로 실행한다(D29 — 합치면 다른 사용자의 홈·TCC 결과를 받게 된다). 로그는 `HaetaeChecks`에 `Logger(subsystem: CodeRequirements.daemonIdentifier, category: "checks"/"ledger"/"patterns")`를 두고 8장의 공개 범위 규칙을 따른다.
   4. 첫 실행 규칙(D7): `isFirstRun`이면 "새로 생김"류 규칙은 건너뛰되, 기준값과 무관한 규칙은 적용한다. 각 검사가 `ctx.isFirstRun`으로 분기한다.
@@ -805,6 +807,7 @@ sequenceDiagram
 - 충족: R18, R16, R2
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/CollectCoordinator.swift`, `haetaed/CollectService.swift`, `haetaed/ListenerDelegate.swift`, `haetaed/DaemonConfiguration.swift`(`ListenerDelegate.swift`에서 `Log`·`DaemonConfiguration`을 옮김 — 시작 단계에 디스크 빌드·`highest-build`·자기 무결성이 붙으므로. `variant`를 필드로 꺼낸다), `haetaed/main.swift`
 - 변경:
+  - `CommandRunner`는 데몬 전체에서 인스턴스 하나만 만들어 주입한다(직렬화가 인스턴스 단위라서, 연결마다 만들면 D26의 "동시 1개"가 깨진다 — WO-8 리뷰).
   0. 규칙 위치(Q23): 아래 1·2·3·4·6의 판단(응답 자르기, ack 개수 상한, 연결 종료 기록, 빈도 제한·결과 공유, 되돌리기 방지)과 WO-40의 `scanGap` 계산은 `public actor CollectCoordinator`(`init(runner:ledger:clock:build:highestBuild: Int?)`, `collect(callerUID:) async throws -> Data`, `ack(_:callerUID:) async throws`, `ensureNotRolledBack() throws`, `connectionClosed(callerUID:userQuit:hadValidCall:) async`)에 둔다. `Clock`과 `highestBuild` 값을 주입받아 파일 없이 테스트할 수 있게 한다. `highestBuild`가 `nil`이면 되돌리기 방지를 끈다 — `main`은 `variant == .release`일 때만 `highest-build`를 읽어 넘기고 Debug는 `nil`을 넘긴다(Q34. 패키지 안에서 `#if DEBUG`로 나누지 않는다 — `swift test`로 Release 경로를 시험할 수 없게 된다) — `highest-build` 파일의 읽기·쓰기(SecureDirectory I/O)는 `main`이 하고 값만 넘긴다. `CollectService`는 `@objc` 어댑터(오류를 NSError로 바꿔 응답 전달)만 하고, `installPatterns`·`markUserQuit` 어댑터도 먼저 `ensureNotRolledBack()`을 부른다.
   1. `collect`: `CheckRunner.runAll(callerUID:)` → `CollectResult`(`patternVersion`, `daemonBuild`, `scanGap`(Q31)은 직전 연결이 `markUserQuit` 없이 끝났거나 "정지 의심"(WO-40)이 기록됐을 때만 채운다 — 잠자기, 메뉴 "종료" 뒤 재실행, 재부팅에는 채우지 않는다) → 개수(`maxFindingsPerReply`)와 바이트(`maxReplyBytes`) 모두 낮은 수준부터 잘라낸다. "높음"만으로도 넘치면 높음도 자른다. 잘린 건수는 `droppedFindings`에 넣고, 잘린 건은 pending으로 남겨 다음 주기에 이어서 보낸다. `resolved`도 바이트 계산에 넣고, 넘치면 다음 응답으로 미룬다 → `CollectResult.encodeValidated()`로 만든다. 어댑터는 오류를 `HaetaeXPCError.….nsError`로만 돌려준다(`DecodingError`·경로를 그대로 싣지 않음, `as NSError` 대신 `.nsError`)
   2. `ack`: `HaetaeXPC.decodeAck`(크기·개수 `maxAckFingerprints`·지문 형식 검증) → `ledger.acknowledge` → 해당 검사의 pending 기준값 반영
@@ -895,7 +898,7 @@ sequenceDiagram
 - 충족: R1, R3, R11, R18, R19
 - 대상: `HaetaeKit/Tests/HaetaeChecksTests/`, `HaetaeKit/Tests/HaetaeAppCoreTests/`
 - 변경:
-  1. `CommandRunner`: 상대 경로 거부, 타임아웃 시 SIGKILL로 정리(`/bin/sleep 30`), `maxBytes` 자르기(`/usr/bin/yes`), 환경 변수가 고정값인지(`/usr/bin/env`)
+  1. `CommandRunner`: 상대 경로·허용 경로 밖(`/usr/local/bin/x`, `/opt/homebrew/bin/x`)·`..` 성분 거부, 인자의 NUL 거부, 타임아웃 시 SIGTERM으로 정리(`/bin/sleep 30` → `timedOut`, `terminatedBySignal`, `exitCode == 15`), SIGTERM을 무시하는 명령은 SIGKILL로 정리(`/usr/bin/perl -e '$SIG{TERM}="IGNORE"; sleep 30'` → 약 timeout + 2초, `exitCode == 9` — `/bin/sleep`은 SIGTERM에 바로 죽어서 이 경로를 못 탄다), `maxBytes` 자르기(`/usr/bin/yes`), 환경 변수가 고정값인지(`/usr/bin/env`), 종료 코드와 시그널 구분(`/bin/sh -c "exit 9"`는 `terminatedBySignal == false`), 손자 프로세스 정리(`/bin/sh -c "/bin/sleep 34 & echo hi"` → 바로 돌아오고 `sleep 34`가 남지 않음, 타임아웃·취소 때도 남지 않음), 실행 중 취소 → `CancellationError`, 동시 호출 3개가 차례로 실행됨. 시험에만 `/bin/sh -c`를 쓴다(구현에서는 금지)
   2. `SafeFileReader`(root 없이 되는 범위): 심볼릭 링크, 상위 경로 심볼릭 링크, 하드링크(`st_nlink` 2), FIFO, 크기 초과를 각각 거부하는지. 소유자 불일치는 테스트용 uid를 주입해 확인.
   3. `Fingerprint` 안정성(같은 입력 → 같은 값, 내용이 바뀌면 다른 값)
   4. `FindingLedger`: `filterNew` → ack 전 재전송 → `acknowledge` 후 제외 → `resolved` → `purge(30일)`
@@ -973,7 +976,7 @@ sequenceDiagram
 ### WO-26: `SessionRunner` — 사용자 세션 수집 (D32)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/SessionRunner.swift`
-- 변경: `run(uid:, executable:, args:)` = `CommandRunner`로 `/bin/launchctl asuser <uid> <executable> <args…>`를 실행한다(셸 없음). 대상 사용자가 GUI에 로그인해 있지 않으면 "세션 없음"으로 건너뛴다. API가 필요한 항목(`CGGetEventTapList`, CoreAudio·CoreMediaIO)은 데몬에서 시도하고, 안 되면 결과에 `collectedBy: app` 표시가 필요하다고 기록한 뒤 WO-33에서 처리한다.
+- 변경: `run(uid:, executable:, args:)` = `CommandRunner`로 `/bin/launchctl asuser <uid> <executable> <args…>`를 실행한다(셸 없음). **시작 전에 Q40을 사용자에게 확인한다** — `launchctl asuser`는 uid를 바꾸지 않아 명령이 사용자 세션 안에서 root로 돈다(WO-8 리뷰 실측). 실제 실행 파일은 `args` 안에 들어가므로 `CommandRunner`의 허용 경로 검사를 여기서도 따로 한다. 대상 사용자가 GUI에 로그인해 있지 않으면 "세션 없음"으로 건너뛴다. API가 필요한 항목(`CGGetEventTapList`, CoreAudio·CoreMediaIO)은 데몬에서 시도하고, 안 되면 결과에 `collectedBy: app` 표시가 필요하다고 기록한 뒤 WO-33에서 처리한다.
 - 완료 판정: `swift build`
 
 ### WO-27: 검사 ④ 프로세스 (`process.suspicious`, `process.apple-impersonation`)
@@ -1245,6 +1248,7 @@ sequenceDiagram
 - 데몬의 `Bundle.main`(확인됨, WO-3 리뷰에서 실측): `bundleURL`은 `Haetae.app`, `executableURL`과 `infoDictionary`는 데몬 자신의 것(내장 `__info_plist`)이다. 그래서 `Bundle.main.infoDictionary`로 자기 값을 읽는 것은 맞고, `bundleURL/Contents/Info.plist`를 읽으면 앱의 값이 나온다.
 - `.gitignore`에 서명 키·인증 파일(`*.p8`, `*.p12`, `*.pem`, `*.key`, `.env` 등)과 릴리스 산출물(`*.pkg`, `*.xcarchive` 등) 패턴이 있다(WO-1 리뷰). 그래도 키는 저장소 밖에 둔다.
 - `HaetaeKit`은 외부 의존이 없어 `Package.resolved`가 아직 생기지 않는다. 외부 패키지(MLX, Sparkle)를 앱 타깃에 넣으면 `Haetae.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`가 생기니 그때 커밋한다. `.build/`·`.swiftpm/`·`.codegraph/`(이 맥 전용 인덱스)는 `.gitignore`로 제외(WO-1).
+- `CommandRunner`(WO-8)를 쓸 때: 실행 파일은 `/usr/bin/`·`/bin/`·`/usr/sbin/`·`/sbin/`·`/usr/libexec/` 아래만 된다. 디스크에서 읽은 값을 인자로 넘길 때는 `--` 뒤에 둔다. 성공 판정은 `!timedOut && !terminatedBySignal && exitCode == 0`. `truncated`면 출력이 불완전할 수 있다. 한 번 호출은 최대 `timeout` + 6초 — 검사의 `timeout`은 그 안에서 부르는 명령들의 합보다 길게 잡는다. `Process`에 NUL이 든 인자를 넘기면 ObjC 예외로 프로세스가 죽는다(러너가 막음 — `Process`를 직접 쓰지 않는다). `launchctl asuser`는 uid를 바꾸지 않는다(Q40).
 - Xcode가 패키지 library product마다 스킴(`HaetaeShared`·`HaetaeChecks`·`HaetaeAppCore`)을 자동으로 보여준다. 빌드·검증은 `Haetae`·`haetaed` 스킴으로만 한다.
 - 커밋은 Phase 완료 판정(7-1 + 7-2)을 통과한 뒤에 한다. 예외: 2026-11-19 사용자 지시로 WO-1 뒤 중간 커밋 3개와 push. 커밋 작성자 이메일은 저장소 로컬 설정(개인 이메일)이다 — 전역 설정은 회사 메일이라 public 저장소에 노출되지 않게 바꿨다. `DerivedData/`, `xcuserdata/`는 `.gitignore`로 제외돼 있고, `Package.resolved`는 커밋한다(D16).
 
@@ -1293,6 +1297,7 @@ sequenceDiagram
 | Q37 | "로그인 시 실행"을 끌 때의 동작 (R12, D28) | 앱은 평소 launchd가 띄운 인스턴스로 돈다(죽으면 다시 띄워 주는 보호). "로그인 시 실행"을 끄면 그 등록이 풀리면서 macOS가 실행 중인 앱을 끝낸다(SDK 문서). 지금 구현은 1번. 1) 끄는 즉시 적용 — 앱이 종료되고(설정 화면에 안내), 다시 열면 보호 없이 돈다 / 2) 끄기는 저장만 하고 다음 "종료" 때 적용 — 앱이 안 꺼져 자연스럽지만, 저장한 값을 같은 사용자 권한의 악성코드가 바꿀 수 있다(다만 그런 악성코드는 등록 자체도 풀 수 있다). Claude 추천: 2 |2번 (2026-11-20): 끄기는 표시만 하고 다음 종료 때 적용. `ServiceRegistrar`·`AppState` 반영 |
 | Q38 | 패널 "종료" 말고 다른 종료 경로 (D28) | D28은 "메뉴 '종료'에서만 `markUserQuit()`". 지금은 Cmd+Q(설정 창), 로그아웃·재시동, 다른 프로세스가 보낸 quit(AppleScript 등)이 모두 정상 종료 코드로 끝나서 ① launchd가 다시 띄우지 않고 ② 데몬은 비정상 종료로 기록한다. 그래서 로그아웃할 때마다 "검사하지 못했어요"가 뜰 수 있고, 다른 프로세스가 quit을 보내 재실행 보호를 끌 수 있다. 1) Cmd+Q는 패널 "종료"와 같게, 로그아웃·재시동은 정상 종료로 기록, 그 밖의 외부 quit은 다시 뜨게(`exit(75)`) — Claude 추천(로그아웃인지 가리는 방법은 구현 때 실측) / 2) 그대로 두고 오탐을 감수 |1번 (2026-11-20): Cmd+Q는 "종료"와 같게, 로그아웃·재시동은 정상 종료로, 그 밖의 외부 quit은 다시 뜨게. `AppDelegate` 반영, 실측은 7-1 P1 |
 | Q39 | Swift 설정 보강 (재리뷰의 최신 Swift 점검 제안) | 1) 패키지(`Package.swift`)에 Xcode 타깃과 같은 기능 켜기(`NonisolatedNonsendingByDefault`·`InferIsolatedConformances`·`MemberImportVisibility`) — 안 맞추면 같은 비동기 함수가 패키지에서는 백그라운드, 앱에서는 호출한 쪽에서 돈다. WO-13 전에 하는 것이 좋다, Claude 추천 / 2) `ExistentialAny` 켜기(`any` 표기 강제, 고칠 곳 1개) — Claude 추천 / 3) strict memory safety 켜기(안전하지 않은 포인터 사용을 표시하게 함, 고칠 곳 약 10개) — Q27에서 WO-8 때 해 보기로 한 것을 앱까지 넓힘, Claude 추천 / 4) 안 함 |1·2·3 전부 (2026-11-20, "swift 고치는 거 전부 다 고쳐"): `Package.swift` 모든 타깃과 두 Xcode 타깃에 반영, `unsafe` 표시 12곳 추가, 빌드 warning 0 |
+| Q40 | `launchctl asuser`가 권한을 낮추지 않음 (D32, T23, Q12) | Q12·D32는 "데몬이 그 사용자 권한으로 실행"한다고 봤지만, WO-8 보안 리뷰 실측(2026-11-20)으로 `launchctl asuser <uid>`는 세션만 바꾸고 uid는 root 그대로다(man 페이지: "does not modify the process' credentials"). 그래서 `SessionRunner`로 돌리는 명령은 사용자 세션 안에서 root로 돈다 — 사용자 파일을 읽는 도구를 root로 돌리면 T23(공격자 파일을 root가 파싱)에 걸린다. WO-26(Phase 4) 시작 전에 정한다. 1) 권한도 낮춰서 실행(`launchctl asuser <uid> /usr/bin/sudo -u <user> …` 또는 자식에서 `setuid`) — 실측 필요, Claude 추천 / 2) root로 두되 사용자 파일을 읽지 않는 명령만 허용(목록 고정) / 3) 해당 항목은 앱이 수집("앱 수집(조작 가능)" 표시) | (미정 — WO-26 전에 결정) |
 
 ## 10. 작업 로그 (append-only)
 
@@ -1523,3 +1528,9 @@ sequenceDiagram
 - 알아낸 것: `run-probes.sh`가 실패를 통과로 판정할 수 있는 곳 4군데(시간 초과, 양성 대조 건너뜀, 데몬 오류를 성공으로 침, ⑥ 대조 실패)를 검증 에이전트가 찾아 별도 테스트 에이전트가 막음 — 이제 건너뜀·확인 못 함이 있으면 exit 1(Release 데몬에서는 양성 대조가 없어 exit 0이 나오지 않음). `launchctl print`는 이 OS에서 프로그램 절대 경로를 보여 주지 않아 pid를 `proc_pidpath`로 풀어 확인. 개인정보 `rg`는 숨김 파일을 건너뛰어 `--hidden -g '!.git'`을 추가. 화면이 잠겨 있으면 화면 도구가 동작하지 않고, 풀려 있어도 메뉴 막대 아이콘은 누르지 못함 — 패널 확인은 사용자 몫.
 - 바뀐 결정: "검증 실패 표시" 항목을 P1에서 P6로 옮김(사용자 결정 — root로 설치본을 바꿔야 해서).
 - 남은 것: 등록 흐름의 로그아웃 관련 확인, 7-2 P1 4항목.
+
+### 2026-11-20 — Claude (WO-8)
+- 한 일: WO-8 — `CommandRunner`(`HaetaeChecks/Engine/CommandRunner.swift`) 구현, WO-1 빌드용 파일 삭제. 별도 에이전트 리뷰 2개(보안, 설계·동시성)와 보안 재리뷰를 받고 반영. 7-2 R14·R13 사용자 확인 기입.
+- 알아낸 것: `Process`의 자식은 자기 프로세스 그룹의 리더다(문서에 없는 동작 — 실행 직후 확인하고 쓴다). `terminate()`는 그룹 전체에 SIGTERM을 보낸다. `Process`에 NUL이 든 인자를 넘기면 `NSInvalidArgumentException`으로 죽는다. 부모의 fd는 자식에 상속되지 않는다. `/System/Volumes/Data` 아래는 사용자가 쓸 수 있어 `/System/` 접두어는 신뢰 경로가 아니다. `launchctl asuser`는 uid를 바꾸지 않는다(Q40).
+- 바뀐 결정: WO-8 지시 보강(`Duration`, 허용 경로, NUL 거부, 그룹 SIGKILL, `terminatedBySignal`), WO-11 `SecurityCheck.timeout`도 `Duration`, WO-19 테스트 항목 보강, WO-12에 "러너 인스턴스 하나", WO-26에 Q40 선행. Q40 추가(미정).
+- 남은 것: Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행). 사용자 지시로 "끄면 다음 로그인 때 안 뜬다"는 건너뜀.
