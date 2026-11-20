@@ -2,6 +2,7 @@ import Foundation
 import HaetaeShared
 import os
 import Security
+import Synchronization
 
 enum Log {
     static let listener = Logger(subsystem: CodeRequirements.daemonIdentifier, category: "listener")
@@ -31,16 +32,14 @@ struct DaemonConfiguration: Sendable {
         #endif
         do {
             let requirement = try CodeRequirements.app(teamID: teamID, minBuild: minBuild, variant: variant)
-            // NSXPC는 문법이 틀린 요구사항 문자열을 받으면 예외로 프로세스를 죽인다. 먼저 컴파일해 본다.
-            var compiled: SecRequirement?
-            let compileStatus = SecRequirementCreateWithString(requirement as CFString, [], &compiled)
+            let compileStatus = CodeRequirements.compileStatus(requirement)
             guard compileStatus == errSecSuccess else {
                 Log.listener.fault("앱 요구사항 컴파일 실패 (\(compileStatus)) — 모든 연결 거부")
                 return DaemonConfiguration(appRequirement: nil, build: build)
             }
-            let selfStatus = try checkSelf(against: CodeRequirements.team(teamID: teamID))
+            let selfStatus = try CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: minBuild)
             guard selfStatus == errSecSuccess else {
-                Log.listener.fault("자기 서명이 HaetaeTeamID와 맞지 않음 (\(selfStatus)) — 모든 연결 거부")
+                Log.listener.fault("자기 서명이 HaetaeTeamID·HaetaeMinBuild와 맞지 않음 (\(selfStatus)) — 모든 연결 거부")
                 return DaemonConfiguration(appRequirement: nil, build: build)
             }
             return DaemonConfiguration(appRequirement: requirement, build: build)
@@ -48,17 +47,6 @@ struct DaemonConfiguration: Sendable {
             Log.listener.fault("앱 요구사항 생성 실패 (\(String(describing: error), privacy: .public)) — 모든 연결 거부")
             return DaemonConfiguration(appRequirement: nil, build: build)
         }
-    }
-
-    /// 읽은 팀 ID가 진짜 자기 팀인지 자기 서명에 대조한다. 설정 실수를 잡는 장치다(번들 변조 탐지는 D20 자기 무결성 검사가 맡는다).
-    private static func checkSelf(against requirementText: String) -> OSStatus {
-        var me: SecCode?
-        var requirement: SecRequirement?
-        var status = SecCodeCopySelf([], &me)
-        guard status == errSecSuccess, let me else { return status }
-        status = SecRequirementCreateWithString(requirementText as CFString, [], &requirement)
-        guard status == errSecSuccess, let requirement else { return status }
-        return SecCodeCheckValidity(me, [], requirement)
     }
 }
 
@@ -74,7 +62,7 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate, Sendable {
     }
 
     private let configuration: DaemonConfiguration
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let state = Mutex(State())
 
     init(configuration: DaemonConfiguration) {
         self.configuration = configuration
@@ -92,7 +80,7 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate, Sendable {
         newConnection.setCodeSigningRequirement(requirement)
 
         let service = CollectService(callerUID: newConnection.effectiveUserIdentifier, build: configuration.build)
-        newConnection.exportedInterface = NSXPCInterface(with: HaetaeXPCProtocol.self)
+        newConnection.exportedInterface = NSXPCInterface(with: (any HaetaeXPCProtocol).self)
         newConnection.exportedObject = service
         newConnection.invalidationHandler = { [self] in
             connectionClosed(hadValidCall: service.hadValidCall)

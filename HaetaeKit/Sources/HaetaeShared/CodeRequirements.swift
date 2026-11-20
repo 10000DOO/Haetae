@@ -1,5 +1,8 @@
+import Foundation
+import Security
+
 /// `NSXPCConnection.setCodeSigningRequirement`에 넘길 요구사항 문자열(3-7).
-/// 순수 함수다. Debug/Release 선택(`variant`)은 호출하는 앱·데몬 타깃에서 한다.
+/// 문자열을 만드는 함수는 순수 함수다. Debug/Release 선택(`variant`)은 호출하는 앱·데몬 타깃에서 한다.
 public enum CodeRequirements {
     public enum Variant: Sendable {
         case debug, release
@@ -26,6 +29,26 @@ public enum CodeRequirements {
     public static func team(teamID: String) throws(InputError) -> String {
         try validate(teamID: teamID)
         return #"anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#
+    }
+
+    /// NSXPC는 문법이 틀린 요구사항 문자열을 받으면 예외로 프로세스를 죽인다. 연결에 걸기 전에 컴파일해 본다.
+    public static func compileStatus(_ requirement: String) -> OSStatus {
+        var compiled: SecRequirement?
+        return unsafe SecRequirementCreateWithString(requirement as CFString, [], &compiled)
+    }
+
+    /// Info.plist에서 읽은 팀 ID·최소 빌드가 서명된 값과 같은지 실행 중인 자기 서명에 대조한다.
+    /// 읽은 뒤 파일을 되돌려 놓는 바꿔치기도 여기서 걸린다(읽은 값 = 서명된 값). 번들 변조 탐지는 D20 자기 무결성 검사가 맡는다.
+    public static func selfSignatureStatus(teamID: String, minBuild: Int) throws(InputError) -> OSStatus {
+        guard minBuild >= 0 else { throw .invalidMinBuild }
+        let text = try team(teamID: teamID) + #" and info[HaetaeMinBuild] = "\#(minBuild)""#
+        var me: SecCode?
+        var requirement: SecRequirement?
+        var status = unsafe SecCodeCopySelf([], &me)
+        guard status == errSecSuccess, let me else { return status }
+        status = unsafe SecRequirementCreateWithString(text as CFString, [], &requirement)
+        guard status == errSecSuccess, let requirement else { return status }
+        return SecCodeCheckValidity(me, [], requirement)
     }
 
     // teamID는 Info.plist에서 오는 값이라 따옴표가 섞이면 요구사항이 다른 뜻으로 바뀐다. 형식이 틀리면 만들지 않는다.
