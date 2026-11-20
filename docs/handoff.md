@@ -13,7 +13,7 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
 ## 현재 상태 (2026-11-19)
-- 기획·설계·작업 계획 끝, 사용자 승인됨. 문서 상태 `구현중`. WO-1~3 `[x]`(패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성), WO-4~46 `[ ]`. 데몬 등록은 `/Applications`의 root 소유 사본에서만 한다(8장, sudo는 사용자에게 요청).
+- 기획·설계·작업 계획 끝, 사용자 승인됨. 문서 상태 `구현중`. WO-1~4 `[x]`(패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대), WO-5~46 `[ ]`. 데몬 등록은 `/Applications`의 root 소유 사본에서만 한다(8장, sudo는 사용자에게 요청).
 - 서명: 두 타깃 Apple Development, Personal Team 47XT7DPDLP로 빌드 확인됨. hardened runtime은 WO-3에서 켰다.
 - 도구: swift-lsp 플러그인 + buildServer.json(xcode-build-server), codegraph 인덱스(.codegraph/), Peekaboo MCP(손쉬운 사용 권한을 Paseo.app에 줘야 함 — 안 돼 있으면 사용자에게 요청), 스킬 write-swift·swift-testing-expert·swiftui-expert-skill·swift-concurrency 플러그인·macos-security-bypass(탐지 규칙 참고용만)·find-skills. 사용자 스킬 xcode-build-verify, reviewer, paseo-handoff 사용 가능.
 - git: main이 origin/main에 push돼 있다(public 저장소). 커밋 이메일은 저장소 로컬 설정(개인 이메일)이라 바꾸지 않는다.
@@ -28,5 +28,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 빌드 설정(Debug/Release, 배포 타깃, 팀)은 WO에 적힌 것 외에는 바꾸지 않는다.
 
 ## 다음 할 일
-WO-4(데몬 뼈대: 리스너, 연결 검증, 종료 규칙)부터 시작해.
+WO-5(앱 뼈대: 메뉴바, 등록, XPC 클라이언트, 종료)부터 시작해.
 ```
