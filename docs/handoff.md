@@ -13,7 +13,7 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
 ## 현재 상태 (2026-11-20)
-- 기획·설계·작업 계획 끝, 사용자 승인됨. 문서 상태 `구현중`. WO-1~6 `[x]`(패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, Phase 1 단위 테스트 42개), WO-7~46 `[ ]`. 이 맥의 `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록돼 있다(실제 등록·연결·종료 흐름은 2026-11-20 확인, 로그아웃만 미확인).
+- 기획·설계·작업 계획 끝, 사용자 승인됨. 문서 상태 `구현중`. WO-1~7 `[x]`(Phase 1 구현·테스트 전부: 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구), WO-8~46 `[ ]`. Phase 1의 7-1·7-2 검증은 아직이다. 이 맥의 `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록돼 있다(실제 등록·연결·종료 흐름은 2026-11-20 확인, 로그아웃만 미확인).
 - 서명: 두 타깃 Apple Development, Personal Team 47XT7DPDLP로 빌드 확인됨. hardened runtime은 WO-3에서 켰다.
 - 도구: swift-lsp 플러그인 + buildServer.json(xcode-build-server), codegraph 인덱스(.codegraph/), Peekaboo MCP(손쉬운 사용 권한을 Paseo.app에 줘야 함 — 안 돼 있으면 사용자에게 요청), 스킬 write-swift·swift-testing-expert·swiftui-expert-skill·swift-concurrency 플러그인·macos-security-bypass(탐지 규칙 참고용만)·find-skills. 사용자 스킬 xcode-build-verify, reviewer, paseo-handoff 사용 가능.
 - git: main이 origin/main에 push돼 있다(public 저장소). 커밋 이메일은 저장소 로컬 설정(개인 이메일)이라 바꾸지 않는다.
@@ -29,5 +29,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 빌드 설정(Debug/Release, 배포 타깃, 팀)은 WO에 적힌 것 외에는 바꾸지 않는다.
 
 ## 다음 할 일
-WO-7(XPC 거부 확인 도구 — paseo-handoff로 별도 에이전트)부터 시작해. 그다음 Phase 1의 7-1 검증(별도 에이전트, 등록된 데몬이 필요한 항목은 사용자에게 8장의 sudo 복사 명령을 요청).
+Phase 1의 7-1 검증부터 시작해(구현하지 않은 별도 에이전트가 실행 — paseo-handoff. 등록된 데몬이 필요한 항목은 사용자에게 8장의 sudo 복사 명령을 요청하고, XPC 거부 항목은 `Tools/xpc-probe/run-probes.sh`로 본다). 통과하면 7-2를 사용자에게 확인받고 Phase 2(WO-8)로 넘어간다.
 ```

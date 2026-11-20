@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-20 · 브랜치: `main` · 다음 액션: WO-7(XPC 거부 확인 도구, 별도 에이전트) → Phase 1의 7-1 검증(별도 에이전트, 사용자 sudo 필요)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-20 · 브랜치: `main` · 다음 액션: Phase 1의 7-1 검증(별도 에이전트, 등록된 데몬이 필요한 항목은 사용자 sudo 복사 뒤) → 7-2 사용자 확인 → Phase 2(WO-8~)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -696,6 +696,7 @@ sequenceDiagram
 
 ### WO-5: 앱 뼈대 — 메뉴바, 등록, XPC 클라이언트, 종료
 - 리뷰 (2026-11-20, 별도 에이전트 3개: 보안·설계·확장성): High 6건(중복 제외) — 가짜 인스턴스(번들 ID만 같은 앱)에 무기한 양보, 승인 안내가 안 나옴·승인 뒤 연결 안 됨, agent 승인 대기면 앱이 사라짐, "로그인 시 실행" 토글의 재실행 루프·자기 종료, 재시도·빌드 확인이 `AppState`에 있어 주기 검사가 건너뜀. 전부 반영해 다시 짬 — 서명이 맞는 인스턴스에만 양보, `status` 기준 판단과 승인 대기 폴링, `DaemonClient.collect() -> CollectResult`로 재시도 이동, `AppIdentity` 분리, 등록 조건 강화(`/Applications`·ACL·정적 서명), UserDefaults 키 제거, 4102도 검증 실패로, 연결 끊김 알림, 설정 창 앞으로. 동시성 코드(`Once`, `@Sendable`)는 리뷰어가 같은 조건으로 실험해 문제없음. Q37(끄기는 종료 때 적용)·Q38(종료 경로별 처리)은 사용자가 결정해 반영. 재리뷰 + 최신 Swift 점검(별도 에이전트 1개, Swift 스킬 3개 기준): 1차 High 6건이 모두 닫힌 것을 확인, 클린 빌드 warning 0. 새 지적 9건 반영 — 종료 사유 위조(loginwindow audit token 확인), 정적 서명에 `kSecCSRestrictSymlinks`, 취소를 삼키는 `try? Task.sleep`, 종료 준비 중 재진입, ACL·열거 오류의 fail-open, agent 승인 대기 안내. 최신 Swift: `Mutex`·`Atomic`, `Duration`, `PropertyListDecoder`, `any` 표기로 고침. 설정 제안(Q39)은 사용자가 전부 하기로 해 반영. 설정·`unsafe` 리뷰(별도 에이전트 1개): 설정이 모든 타깃에 적용됨, `unsafe` 12곳 모두 안전, 클린 빌드 warning 0. 지적 3건 반영 — Finder 인스턴스가 떠 있는 동안 agent가 승인되면 생기는 재실행 루프(`handOffWhenAgentStarts`), 메인 큐 작업 안에서 불린 `terminate`가 `.terminateLater`에서 멈추는 문제(quit Apple Event가 아니면 `.terminateCancel` + `quit()`), `CodeRequirements.swift`의 `import Foundation`. WO-13의 `ReconnectPolicy`, WO-14의 상태 case 분리는 지시에 적음.
+- WO-7 도구에서 발견 (2026-11-20, 낮음): 데몬이 서명 요구사항으로 클라이언트를 거부하면 클라이언트는 4099·4102가 아니라 `NSXPCConnectionInterrupted`(4097)를 받는다. 그런데 `DaemonClient.collect()`(`Haetae/DaemonClient.swift:71`)는 4099·4102만 검증 실패로 세서, 정품 앱이 데몬에게 거부되면(Release 빌드 불일치, 서명이 바뀐 앱) 재시도 뒤 패널이 "데몬 검증 실패"가 아니라 "데몬 응답 없음"(`Haetae/AppState.swift:162`)이 된다. 재현: `Tools/xpc-probe/run-probes.sh` ①~③ — 세 경우 모두 `결과=거부 오류=NSCocoaErrorDomain/4097(중단)`. 기대(WO-5 5번 문구): 거부는 4099/4102. 실제: 4097. 업데이트가 섞이는 구간을 "응답 없음"으로 보이는 게 의도인지 구현 쪽에서 판단 필요(데몬이 거부한 경우와 데몬이 안 뜬 경우를 클라이언트가 오류 코드로 구분할 수 없다). → 구현 쪽 판단(2026-11-20): 그대로 둔다. 4097(중단)은 데몬이 유휴 종료할 때도 오므로 검증 실패로 세면 "높음" 오탐이 난다. 데몬이 정품 앱을 거부하는 경우(Release 빌드 불일치)는 디스크 빌드 확인과 재실행(D20)이 먼저 처리한다. "데몬 검증 실패"는 앱이 데몬의 서명을 거부한 경우(4099·4102)에만 쓴다.
 - 상태: [x] 완료 (Claude, 2026-11-20) — 앱 Debug·Release, 데몬 Debug 빌드 `** BUILD SUCCEEDED **`(컴파일러 warning 0). `rg "WindowGroup|ContentView" Haetae` 0곳, `rg "\.privileged" Haetae` 1곳. 빌드 폴더의 앱을 6초 실행: 죽지 않고, 등록할 수 없는 위치라 데몬을 등록하지 않음. **실제 실행 확인(2026-11-20, 구현자와 사용자가 `/Applications`의 root 소유 Debug 사본으로 함 — 7-1 P1의 정식 체크는 별도 에이전트가 다시 한다)**: Finder 실행 → agent 등록 뒤 넘기기(runs 1, 루프 없음) / 첫 `daemon.register()`는 오류 1을 던지고 status는 승인 대기 → 패널 "시스템 설정에서 승인이 필요함" / 승인 직후 앱 재시작 없이 "연결됨 (빌드 1)" / `haetaed`가 root로 실행, umask 77 / 패널 "종료"·Cmd+Q → `markUserQuit` 기록, 약 5초 뒤 데몬 `연결 0개 — 종료`, 둘 다 exit 0이고 다시 안 뜸 / `kill -9` → 3초 안에 다시 뜸 / `osascript … to quit` → 앱 로그 "외부 quit", exit 75, 4초 안에 다시 뜸(자동화 권한 창 없이 전달됨) / 번들 ID가 같은 ad-hoc 가짜 앱을 띄워 둔 채 `kill -9` → 정품이 양보하지 않고 계속 실행 / "로그인 시 실행" 끄기 → 앱은 그대로, "종료" 뒤 agent 등록이 풀림. **못 한 것**: 사유를 붙인 가짜 quit(TCC 자동화 권한이 시험 프로그램을 막아 앱에 닿지 않음), 로그아웃, 그 뒤에 고친 3건(아래)의 실제 실행.
 - 의존: WO-2, WO-3, WO-4
 - 충족: R2, R12, R13, R14, R16
@@ -726,7 +727,7 @@ sequenceDiagram
 - 완료 판정: `cd HaetaeKit && swift test` 통과
 
 ### WO-7: [테스트 — 별도 에이전트] XPC 거부 확인 도구
-- 상태: [ ] 대기
+- 상태: [x] 완료 (별도 에이전트, 2026-11-20) — `Tools/xpc-probe/main.swift`(collect 한 번 호출, `--exec-swap`·`--after-exec`·`--hold`·`--no-privileged`, 종료 코드 0 거부/1 응답/2 판단 불가), `Tools/xpc-probe/run-probes.sh`(HaetaeShared와 같이 `swiftc` 빌드, 산출물은 임시 폴더, 약 1분 30초). 이 맥(Debug 데몬)에서 실행: 8개 시험 모두 PASS, 응답을 받은 가짜 0건. ⓪ 팀 인증서로 서명한 프로브(identifier `com.10000DOO.Haetae`) → 응답 100바이트(자동 양성 대조 — Release 데몬이면 스크립트가 거부를 기대한다, Release 경로는 미실행) / ① codesign 안 함(링커 ad-hoc) ② ad-hoc ③ ad-hoc + identifier 위장 → 셋 다 4097(중단), 프로브마다 데몬 로그 "유효한 호출 없이 끊긴 연결 (누적 1)", "요구사항 없음" 0건 / ④ exec-swap: collect를 보낸 직후(send barrier) 팀 서명본으로 `execv` → 데몬이 exec 4초 뒤에 떠서 그 메시지를 검사했는데도 거부(끊김 1), exec 뒤 새 연결은 성공 — 지금 요구사항을 통과하는 이미지로 바뀌어도 exec 전 메시지는 통과하지 못함. "같은 연결로 다시 호출"은 불가: `NSXPCConnection`은 exec와 함께 메모리째 사라지고, 표지 mach 포트(receive right + context 값)도 exec 뒤 사라짐을 확인 / ⑤ raw XPC(메시지 없음) + `bootstrap_look_up` send right를 20초 쥠 → 데몬이 뜨지 않음, 다른 프로브로 데몬을 띄우면 붙잡은 채로 5초 뒤 유휴 종료 — 붙잡을 수 없음(WO-4 "raw mach는 WO-7에서 확인" 해소, 시간 제한 불필요) / ⑥ `gui/$UID`에 같은 이름 가짜 서비스: `.privileged` 없이 찾으면 가짜가 뜨고(대조), `.privileged`는 진짜 데몬으로 가서 거부됨 / ⑦ 끝난 뒤 가짜 서비스 없음, 데몬·agent 등록 상태 시작과 같음. 알아낸 것: 서명이 아예 없는 실행 파일은 arm64에서 커널이 죽인다(rc 137) — ①은 링커 ad-hoc으로 대신함. 발견 1건(낮음, 앱 쪽 4097 해석) → WO-5 아래 기록. 데몬 결함 0. 못 한 것: 정품 앱 양성 대조(사람이 할 일), Release 데몬 실행, `launchctl bootstrap` 때 "백그라운드 항목 추가됨" 알림이 떴는지(화면 미확인).
 - 담당: 별도 에이전트 (`paseo-handoff`, "WO-7")
 - 의존: WO-4, WO-5
 - 충족: R16
@@ -1509,4 +1510,9 @@ sequenceDiagram
 - 알아낸 것: `validate()`가 `observedAt`을 보지 않아 NaN·기원전 4712년 이전 날짜는 `encodeValidated`를 통과하고 `decodeValidated`에서 응답 전체가 거부되며, +무한은 다른 날짜로 바뀜(WO-2 아래 기록, 낮음). JSON의 `scanGap: 1e400`은 받는 쪽에서 거부됨. `HaetaeXPCError`는 `as NSError`로 바꿔도 도메인·코드가 같고 `userInfo`가 비어 있음. ASCII로 채운 최대 응답(1,000건 × title 200·evidence 2,000)은 4MB 안에 들어가고, 4바이트 문자로 채우면 약 8MB라 `encodeValidated`가 `tooLarge`로 거부함.
 - 후속(같은 날): 구현 쪽이 `observedAt` 결함을 고친 뒤 known-issue 테스트를 "범위 밖 거부·경계값 왕복·받은 JSON 거부" 테스트로 바꿈 — 42개(케이스 119개) 통과, known issue 0, warning 0.
 - 후속 2(같은 날): 변이 시험(57개 중 53개 잡힘) 뒤 보강 — 43개(케이스 122개) 통과, warning 0. `/tmp` 사본에서 밑줄 허용·`errorDomain`·`machServiceName` 변이가 13건 실패로 잡힘. 실측: 범위 검사를 빼면 -1·0년·10000년·1e12는 정확히 왕복하고, 깨지는 것은 NaN·-1e12초(응답 전체 거부)와 +무한(다른 날짜)뿐이다 — 1970~9999년은 정책.
+- 바뀐 결정: 없음
+
+### 2026-11-20 — Claude (별도 에이전트, WO-7)
+- 한 일: WO-7 — `Tools/xpc-probe/main.swift`·`run-probes.sh` 작성, 이 맥의 Debug 데몬으로 실행해 8개 시험 모두 PASS(응답을 받은 가짜 0건). 앱·데몬·패키지 코드와 launchd 등록은 바꾸지 않음(가짜 `gui/$UID` 서비스는 시험 뒤 지움).
+- 알아낸 것: 데몬이 서명 요구사항으로 거부하면 클라이언트는 4097(중단)을 받는다(4099·4102 아님 — WO-5 아래 기록). 데몬은 직전 기동 약 10초 뒤에야 다시 떠서, 유휴 종료 직후 연결은 응답까지 약 5초 기다렸다(실측 — launchd 기본 throttle로 보이나 확실하지 않음). exec 전에 보낸 메시지는 exec 뒤 이미지가 요구사항을 통과해도 거부된다. mach 포트 권한은 exec를 넘지 않는다. 사용자 프로세스가 `bootstrap_look_up`으로 시스템 데몬의 send right를 받아도 데몬은 뜨지 않는다. 서명이 아예 없는 실행 파일은 arm64에서 실행되지 않는다.
 - 바뀐 결정: 없음
