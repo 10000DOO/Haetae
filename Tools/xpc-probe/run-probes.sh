@@ -4,9 +4,10 @@
 # 양성 대조: 정품 앱 패널에 '연결됨'이 뜨는지 사람이 먼저 확인한 뒤, 패널 "종료"로 앱을 끄고 실행한다.
 #   이 스크립트는 정품 앱을 띄우지 않는다. 대신 팀 인증서(Apple Development)로 서명한 프로브로 자동 양성
 #   대조를 한 번 한다 — Debug 요구사항(팀 + identifier)만 맞추므로 Release 데몬에서는 거부되는 것이 맞다.
+#   Release 데몬이면 자동 양성 대조가 없어 '건너뜀'으로 남고 종료 코드는 0이 아니다(사람이 확인한 결과와 함께 본다).
 # 필요한 것: /Applications/Haetae.app 설치와 데몬 등록(7-1 P1). sudo는 쓰지 않는다.
 # launchd 변경: 사용자 도메인(gui/$UID)에 가짜 서비스를 잠깐 올렸다가 지운다(중간에 죽어도 trap으로 지운다).
-# 종료 코드: 0 = FAIL 없음, 1 = FAIL 있음, 2 = 사전 확인·빌드 실패
+# 종료 코드: 0 = 모든 시험 PASS(⑤ '발견'만 예외), 1 = FAIL·건너뜀·확인 못 함이 하나라도 있음, 2 = 사전 확인·빌드 실패
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 
@@ -19,6 +20,8 @@ FAKE_LOADED=0
 ROWS=()
 EVIDENCE=()
 FAILS=0
+UNVERIFIED=0   # 건너뜀·확인 못 함 — PASS가 아니다
+FOUND=0
 # 이 환경의 RTK 훅이 log show 출력을 비운다(8장).
 LOG=(log)
 command -v rtk >/dev/null && LOG=(rtk proxy log)
@@ -44,7 +47,12 @@ reg_state() {
 }
 row() {
     ROWS+=("| $1 | $2 | $3 | $4 |")
-    [ "$4" = FAIL ] && FAILS=$((FAILS + 1))
+    case "$4" in
+        PASS) ;;
+        발견) FOUND=$((FOUND + 1)) ;;
+        FAIL) FAILS=$((FAILS + 1)) ;;
+        *) UNVERIFIED=$((UNVERIFIED + 1)) ;;
+    esac
 }
 evidence() { EVIDENCE+=("$1"$'\n'"${2:-  (로그 없음)}"); }
 listener_log() {
@@ -68,11 +76,10 @@ probe() {
     R_NOREQ=$(grep -c '요구사항 없음' <<<"$R_LOGS")
 }
 summary() { echo "$R_OUT (rc $R_RC) / 로그: 끊김 $R_INVALID, 요구사항없음 $R_NOREQ"; }
-# 거부 판정: 응답을 받았으면 무조건 FAIL, 아니면 끊김 로그가 있고 "요구사항 없음"이 없어야 PASS.
+# 거부 판정: 프로브가 응답 없이 중단·무효화로 끝났고(rc 0), 끊김 로그가 있고 "요구사항 없음"이 없어야 PASS.
+# 응답(1·3), 시간 초과·그 밖의 오류(2), limit에 끊김(142) 등 나머지는 모두 FAIL.
 reject_verdict() {
-    if [ "$R_RC" = 1 ]; then echo FAIL
-    elif [ "$R_INVALID" -ge 1 ] && [ "$R_NOREQ" = 0 ]; then echo PASS
-    else echo FAIL; fi
+    if [ "$R_RC" = 0 ] && [ "$R_INVALID" -ge 1 ] && [ "$R_NOREQ" = 0 ]; then echo PASS; else echo FAIL; fi
 }
 
 # ── 사전 확인 ──
@@ -96,8 +103,9 @@ if ! limit 300 swiftc -swift-version 6 -module-name xpcprobe -package-name Haeta
 fi
 # ① codesign을 하지 않은 것 — swiftc 링커가 붙인 ad-hoc 서명만 있다(서명이 아예 없으면 arm64 커널이 실행을 막는다).
 PROBE=$WORK/probe
-cp "$PROBE" "$WORK/adhoc" && codesign -f -s - "$WORK/adhoc" 2>/dev/null
-cp "$PROBE" "$WORK/fake-id" && codesign -f -s - -i "$APP_ID" "$WORK/fake-id" 2>/dev/null
+# 서명에 실패하면 파일을 지워, ②·③이 ①과 같은 이미지로 PASS하지 않고 실행 실패(FAIL)로 남게 한다.
+cp "$PROBE" "$WORK/adhoc" && codesign -f -s - "$WORK/adhoc" 2>/dev/null || rm -f "$WORK/adhoc"
+cp "$PROBE" "$WORK/fake-id" && codesign -f -s - -i "$APP_ID" "$WORK/fake-id" 2>/dev/null || rm -f "$WORK/fake-id"
 TEAM_ID=$(plutil -extract HaetaeTeamID raw "$APP/Contents/Info.plist" 2>/dev/null)
 TEAM=""
 cp "$PROBE" "$WORK/team" &&
@@ -114,6 +122,8 @@ elif [ "$RELEASE" = 1 ]; then
     probe "$TEAM"
     row "⓪ 팀 서명 프로브(Release 데몬)" "거부" "$(summary)" "$(reject_verdict)"
     evidence "⓪ 팀 서명 프로브(Release 데몬)" "$R_LOGS"
+    # 양성 대조 없이 ①~③이 PASS하면 "모두 거부하는 데몬"과 구별되지 않는다.
+    row "⓪ 양성 대조" "응답 받음" "Release 데몬 — 이 스크립트로는 할 수 없음(정품 앱으로 사람이 확인)" "건너뜀"
 else
     probe "$TEAM"
     if [ "$R_RC" = 1 ] && [ "$R_NOREQ" = 0 ] && [ "$R_INVALID" = 0 ]; then V=PASS; else V=FAIL; fi
@@ -145,6 +155,8 @@ ORDER="확실하지 않음"
 if [ -n "$SWAP_AT" ] && [ -n "$REJECT_AT" ]; then
     if [[ "$REJECT_AT" > "$SWAP_AT" ]]; then ORDER="끊김($REJECT_AT)이 exec($SWAP_AT) 뒤"; else ORDER="끊김($REJECT_AT)이 exec($SWAP_AT) 전"; fi
 fi
+# 데몬이 exec 전에 메시지를 검사했으면 ①과 같은 시험일 뿐이다 — exec 뒤 검사를 확인하지 못하면 PASS가 아니다.
+[ "$V" = PASS ] && [[ "$ORDER" != *뒤 ]] && V="확인 못 함"
 row "$NAME" "exec 전 메시지 거부" "$(summary) / $ORDER" "$V"
 evidence "$NAME" "$R_LOGS"
 
@@ -208,6 +220,8 @@ if fake_up; then
         [ -e "$MARKER" ] && FAKE_HIT=예
         fake_down
         V=$(reject_verdict)
+        # 대조에서 가짜가 뜨지 않았으면 가짜를 피했는지 알 수 없다.
+        [ "$V" = PASS ] && [ "$REACHED" != 예 ] && V="확인 못 함"
         [ "$FAKE_HIT" = 예 ] && V=FAIL
         row "$NAME" ".privileged는 진짜 데몬으로" "대조(.privileged 없음 → 가짜 기동: $REACHED, $CONTROL) / .privileged → 가짜 기동: $FAKE_HIT, $(summary)" "$V"
         evidence "$NAME" "$R_LOGS"
@@ -235,4 +249,6 @@ printf '%s\n' "${ROWS[@]}"
 echo
 echo "근거 로그 (subsystem $SERVICE, category listener):"
 printf '%s\n' "${EVIDENCE[@]}"
-[ "$FAILS" = 0 ]
+echo
+echo "PASS 아님: FAIL ${FAILS}건, 건너뜀·확인 못 함 ${UNVERIFIED}건 / 발견 ${FOUND}건(⑤ — XPC 거부 기준 밖, 있으면 WO-4에 기록)"
+if [ "$FAILS" = 0 ] && [ "$UNVERIFIED" = 0 ]; then echo "전체 판정: PASS"; else echo "전체 판정: PASS 아님"; exit 1; fi

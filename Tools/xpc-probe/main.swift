@@ -5,7 +5,8 @@
 //   xpc-probe [--no-privileged] [--timeout 초]   collect를 한 번 부르고 결과를 한 줄로 출력
 //   xpc-probe --exec-swap <실행 파일>            collect를 보낸 직후 execv로 <실행 파일 --after-exec>가 된다
 //   xpc-probe --hold <초>                        메시지 없이 서비스 연결만 쥐고 기다린다
-// 종료 코드: 0 = 거부됨(기대), 1 = 응답을 받음(방어 실패 — 양성 대조에서는 기대), 2 = 판단 불가
+// 종료 코드: 0 = 응답 없이 중단·무효화로 거부됨(기대), 1 = CollectResult로 읽히는 응답을 받음(방어 실패 — 양성 대조에서는 기대),
+//           2 = 판단 불가(시간 초과, 중단·무효화가 아닌 오류), 3 = 응답은 왔지만 CollectResult가 아님(데몬 오류·읽기 실패)
 
 import Bootstrap
 import Darwin
@@ -15,6 +16,7 @@ import XPC
 
 enum Outcome: Sendable {
     case reply(bytes: Int)
+    case unreadableReply(bytes: Int, reason: String)
     case daemonError(domain: String, code: Int)
     case rejected(domain: String, code: Int)
     case timedOut
@@ -23,6 +25,8 @@ enum Outcome: Sendable {
         switch self {
         case .reply(let bytes):
             "결과=성공 응답=\(bytes)바이트"
+        case .unreadableReply(let bytes, let reason):
+            "결과=성공 읽기실패=\(bytes)바이트 \(reason)"
         case .daemonError(let domain, let code):
             "결과=성공 데몬오류=\(domain)/\(code)"
         case .rejected(let domain, let code):
@@ -34,8 +38,10 @@ enum Outcome: Sendable {
 
     var exitCode: Int32 {
         switch self {
-        case .rejected: 0
-        case .reply, .daemonError: 1
+        case .rejected(let domain, let code):
+            domain == NSCocoaErrorDomain && (code == NSXPCConnectionInterrupted || code == NSXPCConnectionInvalid) ? 0 : 2
+        case .reply: 1
+        case .unreadableReply, .daemonError: 3
         case .timedOut: 2
         }
     }
@@ -87,10 +93,16 @@ func sendCollect(on connection: NSXPCConnection, outcome: FirstOutcome) {
         exit(2)
     }
     proxy.collect { data, error in
-        if let data {
-            outcome.finish(.reply(bytes: data.count))
-        } else {
+        guard let data else {
             outcome.finish(.daemonError(domain: error?.domain ?? "-", code: error?.code ?? 0))
+            return
+        }
+        // 양성 대조는 앱과 같은 검증(D9)을 통과한 데이터만 성공으로 친다.
+        do {
+            _ = try CollectResult.decodeValidated(data)
+            outcome.finish(.reply(bytes: data.count))
+        } catch {
+            outcome.finish(.unreadableReply(bytes: data.count, reason: "\(error)"))
         }
     }
 }
