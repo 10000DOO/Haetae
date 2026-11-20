@@ -156,7 +156,7 @@ final class AppState {
             daemonStatus = .error("데몬이 옛 빌드")
         } catch let error as HaetaeXPCError {
             daemonStatus = .error("데몬 오류 \(error.rawValue)")
-        } catch is WireValidationError {
+        } catch is WireValidationError, is DecodingError {
             daemonStatus = .error("데몬 응답 형식 오류")
         } catch {
             daemonStatus = .error("데몬 응답 없음")

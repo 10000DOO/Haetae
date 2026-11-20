@@ -55,6 +55,9 @@ extension CollectResult {
         return result
     }
 
+    /// 1970-01-01 … 9999-12-31 (UTC).
+    static let observedAtRange: ClosedRange<TimeInterval> = 0...253_402_300_799
+
     /// 상대가 뚫렸다고 가정한 형식·길이 검증. 바이트 수는 보지 않는다(받을 때는 `decodeValidated`, 보낼 때는 `encodeValidated`가 본다).
     /// 제어문자·bidi 문자는 여기서 거부하지 않는다 — 파일 하나로 응답 전체를 막을 수 있게 되기 때문이다(치환은 데몬, 표시는 앱이 맡는다).
     public func validate() throws(WireValidationError) {
@@ -70,6 +73,8 @@ extension CollectResult {
             guard Finding.isCheckID(finding.checkID) else { throw .invalidField("checkID") }
             guard finding.title.unicodeScalars.count <= HaetaeLimits.maxTitleChars else { throw .invalidField("title") }
             guard finding.evidence.unicodeScalars.count <= HaetaeLimits.maxEvidenceChars else { throw .invalidField("evidence") }
+            // 아주 먼 과거는 다시 읽히지 않고 아주 먼 미래는 다른 날짜로 풀려, 받는 쪽이 응답 전체를 거부한다. 관측 시각으로 말이 되는 범위만 보낸다.
+            guard Self.observedAtRange.contains(finding.observedAt.timeIntervalSince1970) else { throw .invalidField("observedAt") }
             // 지문은 식별자다(D18). 같은 값이 두 번 오면 받는 쪽 사전·목록이 깨진다.
             guard Finding.isFingerprint(finding.fingerprint), seen.insert(finding.fingerprint).inserted else { throw .invalidField("fingerprint") }
             perCheck[finding.checkID, default: 0] += 1
