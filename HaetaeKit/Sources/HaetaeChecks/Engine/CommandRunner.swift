@@ -25,7 +25,8 @@ public enum CommandError: Error, Equatable {
 ///
 /// 한 인스턴스는 명령을 한 번에 하나만 돌린다. 데몬 전체에서 하나만 만들어 나눠 쓴다.
 public actor CommandRunner {
-    /// root가 실행해도 되는 곳. 모두 SIP가 보호해서 사용자가 파일을 바꿀 수 없다.
+    /// root가 실행해도 되는 곳. SIP가 보호하는 시스템 볼륨이지만, firmlink로 쓰기 가능한 Data 볼륨에 이어진 곳
+    /// (`/usr/libexec/cups`)이 있어 `run`에서 볼륨을 따로 확인한다.
     /// `/System/`은 넣지 않는다 — `/System/Volumes/Data` 아래는 사용자가 쓸 수 있다.
     private static let trustedPrefixes = ["/usr/bin/", "/bin/", "/usr/sbin/", "/sbin/", "/usr/libexec/"]
     private static let killGrace: Duration = .seconds(2)
@@ -37,7 +38,7 @@ public actor CommandRunner {
     public init() {}
 
     /// - Parameters:
-    ///   - executable: `trustedPrefixes` 아래의 절대 경로.
+    ///   - executable: `trustedPrefixes` 아래의 절대 경로. 링크 없이 닿는, 시스템 볼륨의 파일이어야 한다.
     ///   - args: 그대로 넘긴다. 디스크에서 읽은 값을 넣을 때는 옵션으로 읽히지 않게 호출하는 쪽이 `--` 뒤에 둔다.
     ///   - timeout: 넘으면 SIGTERM, 2초 뒤 SIGKILL. 돌아오기까지는 최대 `timeout` + 6초가 걸린다.
     ///   - maxBytes: `stdout`·`stderr` 각각의 상한.
@@ -50,6 +51,8 @@ public actor CommandRunner {
         else { throw CommandError.executableNotAllowed }
         // NUL이 있으면 Foundation이 ObjC 예외를 던진다. Swift에서 잡을 수 없어 데몬이 죽으므로 지우면 안 된다.
         guard !([executable] + args).contains(where: { $0.contains("\0") }) else { throw CommandError.nulInArgument }
+        // 접두어는 대소문자·유니코드 변형으로 우회되므로 firmlink 예외는 이름이 아니라 파일이 있는 볼륨으로 거른다.
+        guard Self.isOnSystemVolume(executable) else { throw CommandError.executableNotAllowed }
         precondition(maxBytes >= 0, "maxBytes는 0 이상")
 
         // actor는 await 사이에 다른 호출을 받으므로, 한 번에 하나만 돌리려면 차례를 직접 세운다.
@@ -83,9 +86,6 @@ public actor CommandRunner {
         process.terminationHandler = { _ in sink.yield(.exited) }
         try process.run()
         let pid = process.processIdentifier
-        // Foundation은 자식을 자기 프로세스 그룹의 리더로 띄우지만 문서에 없는 동작이다.
-        // 확인됐을 때만 그룹에 시그널을 보낸다(아니면 데몬 자신의 그룹일 수 있다).
-        let ownsGroup = getpgid(pid) == pid
         for (pipe, buffer) in zip(pipes, buffers) {
             let fd = pipe.fileHandleForReading.fileDescriptor
             pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -134,7 +134,7 @@ public actor CommandRunner {
                     timedOut = true
                     process.terminate()
                 case .killDeadline:
-                    forceKill(process, pid: pid, group: ownsGroup)
+                    forceKill(process, pid: pid)
                 case .abandon where !exited, .drainDeadline:
                     break loop
                 default:
@@ -147,7 +147,7 @@ public actor CommandRunner {
 
         // 끝났든 취소됐든(취소되면 위 루프가 바로 끝난다) 명령이 남긴 프로세스를 root로 떠돌게 두지 않는다.
         // 리더가 끝난 뒤에도 출력을 쓰던 자식은 위에서 EOF나 기한까지 기다렸다.
-        forceKill(process, pid: pid, group: ownsGroup)
+        forceKill(process, pid: pid)
         try Task.checkCancellation()
         let out = buffers[0].snapshot()
         let err = buffers[1].snapshot()
@@ -162,13 +162,24 @@ public actor CommandRunner {
         )
     }
 
-    private static func forceKill(_ process: Process, pid: pid_t, group: Bool) {
-        if group {
-            // 리더가 끝났어도 그룹에 프로세스가 남아 있는 동안은 이 번호가 다시 쓰이지 않는다. 비었으면 ESRCH로 끝난다.
-            // 빈 그룹의 번호가 그 사이 다른 그룹에 다시 쓰이려면 pid가 한 바퀴 돌아야 한다.
-            killpg(pid, SIGKILL)
-        } else if process.isRunning {
-            // 이미 끝난 pid는 다른 프로세스가 물려받았을 수 있다. root의 SIGKILL이 엉뚱한 곳에 가지 않게 확인한다.
+    /// 링크를 하나도 따라가지 않고 연 파일이 시스템(root) 볼륨에 있으면 경로 전체가 그 볼륨 안이라 검사 뒤에 바뀌지 않는다.
+    /// 링크를 따라가면 쓰기 가능한 곳(firmlink인 `/usr/libexec/cups`)에 둔 링크를 검사 뒤 바꿔치기할 수 있다.
+    private static func isOnSystemVolume(_ path: String) -> Bool {
+        // O_NONBLOCK: FIFO를 열다 멈추지 않게.
+        let fd = unsafe open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var fs = statfs()
+        return unsafe fstatfs(fd, &fs) == 0 && fs.f_flags & UInt32(MNT_ROOTFS) != 0
+    }
+
+    private static func forceKill(_ process: Process, pid: pid_t) {
+        // Foundation은 자식을 자기 프로세스 그룹의 리더로 띄운다(문서에 없는 동작). 커널은 쓰이고 있는 그룹 번호를
+        // 새 pid로 주지 않으므로, 번호가 pid인 그룹은 자식이 만든 것뿐이다 — 자식이 먼저 끝났어도 그룹째 정리한다.
+        // 리더가 끝났어도 그룹에 프로세스가 남아 있는 동안은 이 번호가 다시 쓰이지 않는다.
+        // 빈 그룹의 번호가 그 사이 다른 그룹에 다시 쓰이려면 pid가 한 바퀴 돌아야 한다.
+        if killpg(pid, SIGKILL) != 0, process.isRunning {
+            // 그룹이 없으면(ESRCH) 자식만 죽인다. 이미 끝난 pid는 다른 프로세스가 물려받았을 수 있어 실행 중일 때만.
             kill(pid, SIGKILL)
         }
     }
