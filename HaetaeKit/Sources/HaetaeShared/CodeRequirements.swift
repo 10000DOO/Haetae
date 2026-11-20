@@ -22,11 +22,21 @@ public enum CodeRequirements {
         try requirement(identifier: daemonIdentifier, teamID: teamID, minBuild: minBuild, variant: variant)
     }
 
-    private static func requirement(identifier: String, teamID: String, minBuild: Int, variant: Variant) throws(InputError) -> String {
-        // teamID는 Info.plist에서 오는 값이라 따옴표가 섞이면 요구사항이 다른 뜻으로 바뀐다. 형식이 틀리면 만들지 않는다.
+    /// 앱·데몬이 Info.plist에서 읽은 팀 ID를 자기 서명에 대조할 때 쓴다(`SecCodeCheckValidity`).
+    public static func team(teamID: String) throws(InputError) -> String {
+        try validate(teamID: teamID)
+        return #"anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#
+    }
+
+    // teamID는 Info.plist에서 오는 값이라 따옴표가 섞이면 요구사항이 다른 뜻으로 바뀐다. 형식이 틀리면 만들지 않는다.
+    private static func validate(teamID: String) throws(InputError) {
         guard teamID.utf8.count == 10, teamID.utf8.allSatisfy({ (0x30...0x39).contains($0) || (0x41...0x5A).contains($0) }) else {
             throw .invalidTeamID
         }
+    }
+
+    private static func requirement(identifier: String, teamID: String, minBuild: Int, variant: Variant) throws(InputError) -> String {
+        try validate(teamID: teamID)
         guard minBuild >= 0 else { throw .invalidMinBuild }
 
         let base = #"anchor apple generic and identifier "\#(identifier)""#

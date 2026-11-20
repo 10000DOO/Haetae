@@ -1,4 +1,8 @@
 import Foundation
+import HaetaeShared
 
-print("Hello, World!")
-
+let delegate = ListenerDelegate(configuration: DaemonConfiguration.load())
+let listener = NSXPCListener(machServiceName: HaetaeXPC.machServiceName)
+listener.delegate = delegate
+listener.resume()
+dispatchMain()
