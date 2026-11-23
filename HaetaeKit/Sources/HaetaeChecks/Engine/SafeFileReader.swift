@@ -244,7 +244,7 @@ private func regularFileInfo(_ fd: Int32) throws -> stat {
     return info
 }
 
-private func readChunks(_ fd: Int32, _ body: (ArraySlice<UInt8>) throws -> Void) throws {
+func readChunks(_ fd: Int32, _ body: (ArraySlice<UInt8>) throws -> Void) throws {
     var chunk = [UInt8](repeating: 0, count: 65_536)
     while true {
         let (count, code) = chunk.withUnsafeMutableBytes {
