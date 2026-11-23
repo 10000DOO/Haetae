@@ -40,14 +40,11 @@ public actor CommandRunner {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private let selfExecutable: (path: String, requirement: LaunchCodeRequirement)?
 
-    /// - Parameter selfExecutable: 해석 전용 프로세스로 띄울 데몬 자신(WO-48). 이 경로 하나만 시스템 볼륨 밖이어도 되고,
+    /// - Parameter selfExecutable: 해석 서비스가 해석 자식으로 띄울 자기 자신(WO-49). 이 경로 하나만 시스템 볼륨 밖이어도 되고,
     ///   띄울 때 반드시 `requirement`(자기 cdhash)를 건다 — `/Applications`는 admin이 바꿀 수 있어서다.
     public init(selfExecutable: (path: String, requirement: LaunchCodeRequirement)? = nil) {
         self.selfExecutable = selfExecutable
     }
-
-    /// `IsolatedParser`가 띄울 경로. 경로를 따로 넘기다 어긋나지 않게 러너가 가진 값을 쓴다.
-    public nonisolated var selfExecutablePath: String? { selfExecutable?.path }
 
     /// - Parameters:
     ///   - executable: `trustedPrefixes` 아래의 절대 경로. 링크 없이 닿는, 시스템 볼륨의 파일이어야 한다.

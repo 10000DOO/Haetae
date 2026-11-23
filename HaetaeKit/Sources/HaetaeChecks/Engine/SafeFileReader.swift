@@ -143,8 +143,8 @@ func onDedicatedThread<T: Sendable>(limitedTo uid: uid_t?, _ body: @escaping @Se
     }
 }
 
-/// 스레드·취소 중 먼저 온 쪽만 continuation을 깨운다.
-private final class ContinuationSlot<T: Sendable>: Sendable {
+/// 여러 쪽(스레드·답·타임아웃·취소) 중 먼저 온 쪽만 continuation을 깨운다.
+final class ContinuationSlot<T: Sendable>: Sendable {
     private let state = Mutex<CheckedContinuation<T, any Error>?>(nil)
 
     func store(_ continuation: CheckedContinuation<T, any Error>) {

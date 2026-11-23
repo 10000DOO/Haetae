@@ -4,10 +4,10 @@ import HaetaeShared
 /// 공격자가 쓸 수 있는 파일을 해석하는 전용 프로세스(Q42·Q47). 데몬이 자기 실행 파일을 `--parse <형식>`으로 다시 띄운다.
 /// 해석기가 뚫려도 할 수 있는 일이 적게, 입력을 읽기 전에 nobody로 내려가고 자원을 제한한다.
 public enum ParserProcess {
-    /// 종료 코드(sysexits). 뚫린 자식은 종료 코드를 마음대로 고를 수 있으니 데몬 쪽(WO-48)은 0인지만 믿는다.
-    public static let exitUsage: Int32 = 64
-    public static let exitBadInput: Int32 = 65
-    public static let exitNoPermission: Int32 = 77
+    /// 종료 코드(sysexits). 뚫린 자식은 종료 코드를 마음대로 고를 수 있으니 서비스(WO-49)는 0인지만 믿는다.
+    static let exitUsage: Int32 = 64
+    static let exitBadInput: Int32 = 65
+    static let exitNoPermission: Int32 = 77
 
     /// stdin의 내용을 해석해 `ParsedValue`를 JSON으로 stdout에 쓰고 끝낸다. 결과는 stdout으로만 나간다.
     public static func run(arguments: [String]) -> Never {

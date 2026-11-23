@@ -1,5 +1,7 @@
 import Foundation
 import HaetaeShared
+import LightweightCodeRequirements
+import Security
 import Synchronization
 
 /// 해석 서비스(`haetae-parser`, Q48·Q54). launchd가 nobody로 띄우는 별도 실행 파일이라 데몬의 TCC 권한(전체 디스크 접근)을
@@ -11,7 +13,7 @@ public enum ParserService {
     /// - Parameter daemonRequirement: 데몬의 서명 요구사항. 이것을 통과한 상대만 요청할 수 있다.
     public static func run(daemonRequirement: String) -> Never {
         // plist의 UserName이 먹지 않아 root로 떴어도 여기서 내린다.
-        guard ParserProcess.dropPrivileges(), let me = try? IsolatedParser.selfExecutable() else {
+        guard ParserProcess.dropPrivileges(), let me = selfExecutable() else {
             exit(ParserProcess.exitNoPermission)
         }
         let activity = Activity()
@@ -28,6 +30,27 @@ public enum ParserService {
         idleTimer.resume()
         // delegate는 약한 참조다.
         withExtendedLifetime((delegate, listener, idleTimer)) { dispatchMain() }
+    }
+
+    /// 자기 실행 파일과 그 cdhash 요구사항. 해석 자식은 이것으로만 띄운다.
+    /// cdhash로 묶는다 — 팀 ID로 묶으면 같은 팀이 서명한 예전 버전을 바꿔 둘 수 있다(D20).
+    private static func selfExecutable() -> (path: String, requirement: LaunchCodeRequirement)? {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var info: CFDictionary?
+        var running: SecRequirement?
+        guard let path = Bundle.main.executablePath,
+              unsafe SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              unsafe SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              unsafe SecCodeCopySigningInformation(staticCode, [], &info) == errSecSuccess,
+              let cdhash = (info as? [String: Any])?[kSecCodeInfoUnique as String] as? Data,
+              // 위 cdhash는 디스크의 서명이다. 뜬 뒤 파일을 바꿔 두면 바뀐 파일의 것이 나온다(리뷰 실측).
+              // 실행 중인 코드가 이 cdhash인지 확인한다 — 다르면 공격자 파일을 요구사항으로 묶게 된다.
+              unsafe SecRequirementCreateWithString("cdhash H\"\(lowercaseHex(cdhash))\"" as CFString, [], &running) == errSecSuccess,
+              SecCodeCheckValidity(code, [], running) == errSecSuccess
+        else { return nil }
+        guard let requirement = try? LaunchCodeRequirement.allOf(requirement: { CodeDirectoryHash(cdhash) }) else { return nil }
+        return (path, requirement)
     }
 
     /// 진행 중인 요청 수와 마지막 요청 시각.
