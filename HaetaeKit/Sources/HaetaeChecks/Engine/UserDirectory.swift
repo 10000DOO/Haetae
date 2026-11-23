@@ -23,7 +23,8 @@ public enum UserDirectory {
     /// 데몬은 호출 사용자 1명만 다룬다(D29). 다른 계정의 홈이 멈추거나 깨져 있어도 이 사용자의 검사에 번지지 않게 이 계정만 본다.
     /// - Returns: uid가 501 미만이거나, 계정이 없거나, 홈·그룹이 없거나, 홈이 링크이거나 소유자가 다르면 nil.
     ///   호출 사용자가 nil이면 그 사용자 범위 검사는 "발견 없음"이 아니라 실패로 올린다(T12).
-    /// - Throws: 조회 명령이 실패하면 `lookupFailed`. 취소되면 `CancellationError`.
+    /// - Throws: 조회 명령이 실패하면 `lookupFailed`, 명령을 띄우지 못하면 `CommandRunner.run`의 에러 그대로,
+    ///   읽기 스레드가 모자라면 `SafeFileError.system(EAGAIN)`. 취소되면 `CancellationError`.
     public static func user(uid: uid_t, runner: CommandRunner) async throws -> UserRecord? {
         guard uid >= 501 else { return nil }
         let list = try await runner.run("/usr/bin/dscl", [".", "-list", "/Users", "UniqueID"], timeout: timeout, maxBytes: maxBytes)
@@ -51,7 +52,7 @@ public enum UserDirectory {
 
         // 홈 경로 어디든 심볼릭 링크가 있으면 뺀다(`lstat`은 끝에 `/`가 붙은 링크를 따라간다).
         // 홈이 멈춘 볼륨에 있을 수 있어 SafeFileReader와 같은 전용 스레드에서 연다.
-        let owner = try await onDedicatedThread(limited: true) { () -> uid_t? in
+        let owner = try await onDedicatedThread(limitedTo: uid) { () -> uid_t? in
             let fd = unsafe open(home, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_CLOEXEC)
             guard fd >= 0 else { return nil }
             defer { close(fd) }

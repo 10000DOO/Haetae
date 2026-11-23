@@ -10,8 +10,6 @@ public enum SafeFileError: Error, Equatable {
     /// FIFO, 장치, 디렉터리 등.
     case notRegularFile
     case ownerMismatch
-    /// 링크 수가 1이 아니다. 다른 파일에 걸린 하드링크일 수 있다(사용자 파일만 본다).
-    case hardLink
     /// root로 읽을 파일의 폴더가 root 소유가 아니거나, group·other가 쓸 수 있거나, 사용자가 붙인 볼륨에 있다.
     case untrustedDirectory
     /// root만 읽을 수 있는 파일이라 내용을 돌려주지 않는다. `metadata`를 쓴다(D25).
@@ -33,10 +31,11 @@ public struct FileMetadata: Sendable, Equatable {
 public struct SafeFileReader: Sendable {
     public init() {}
 
-    /// `user` 권한으로 열어서, `user`가 소유한 링크 수 1의 일반 파일이고 `maxBytes` 이하일 때만 내용을 돌려준다.
+    /// `user` 권한으로 열어서, `user`가 소유한 일반 파일이고 `maxBytes` 이하일 때만 내용을 돌려준다.
+    /// 링크 수는 보지 않는다 — 아무 사용자나 남의 파일에 하드링크를 걸어 링크 수를 올릴 수 있다(Q43·Q46).
+    /// 남의 파일에 건 하드링크는 소유자 확인과 사용자 권한이 막고, 자기 파일에 건 것은 읽어도 해가 없다.
     ///
-    /// 시스템 파일은 `UserRecord.root`로 읽는다. 이때는 root만 쓸 수 있는 폴더 안의 root 소유 파일만 받고 링크 수는 보지 않는다
-    /// — 아무 사용자나 root 파일에 하드링크를 걸어 링크 수를 올릴 수 있다(Q43). 남이 그 폴더에 링크를 심을 수는 없다.
+    /// 시스템 파일은 `UserRecord.root`로 읽는다. 이때는 root만 쓸 수 있는 폴더 안의 root 소유 파일만 받는다.
     /// 누구나 읽을 수 있는 파일만 내용을 돌려준다. 그 결과는 모든 사용자에게 가기 때문이다(D29, T1).
     ///
     /// 데몬이 root가 아니면(테스트) 권한을 바꾸지 않고 자기 권한으로 읽는다 — 낮출 권한이 없으니 더 읽게 되지도 않는다.
@@ -44,7 +43,7 @@ public struct SafeFileReader: Sendable {
     public func read(path: String, asUser user: UserRecord, maxBytes: Int) async throws -> Data {
         try validate(path)
         precondition(maxBytes >= 0, "maxBytes는 0 이상")
-        return try await onDedicatedThread(limited: user.uid != 0) { try readAs(user, path: path, maxBytes: maxBytes) }
+        return try await onDedicatedThread(limitedTo: user.uid == 0 ? nil : user.uid) { try readAs(user, path: path, maxBytes: maxBytes) }
     }
 
     /// root 전용 파일의 내용 대신 해시·크기·수정 시각만 돌려준다. `UserRecord.root`로 읽을 때와 같은 조건만 받는다.
@@ -52,7 +51,7 @@ public struct SafeFileReader: Sendable {
     public func metadata(path: String, maxBytes: Int) async throws -> FileMetadata {
         try validate(path)
         precondition(maxBytes >= 0, "maxBytes는 0 이상")
-        return try await onDedicatedThread(limited: false) {
+        return try await onDedicatedThread(limitedTo: nil) {
             let (fd, info) = try openRootFile(path)
             defer { close(fd) }
             guard info.st_size <= maxBytes else { throw SafeFileError.tooLarge }
@@ -65,7 +64,8 @@ public struct SafeFileReader: Sendable {
             }
             return FileMetadata(
                 sha256: hasher.finalize().map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined(),
-                size: Int64(info.st_size),
+                // 읽는 사이 파일이 바뀌어도 해시와 크기가 같은 내용을 가리키게 한다.
+                size: Int64(total),
                 modified: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))
             )
         }
@@ -80,11 +80,12 @@ public struct SafeFileReader: Sendable {
 /// `KAUTH_UID_NONE`·`KAUTH_GID_NONE`(sys/kauth.h). 식이 든 매크로라 Swift로 들어오지 않는다.
 private let kauthNone: UInt32 = ~0 - 100
 
-/// 사용자 쪽(멈출 수 있는 볼륨)에서 동시에 도는 스레드 수. 커널에서 멈춘 채 버려진 스레드도 센다. 쌓여서 프로세스의
-/// 스레드 한도에 닿으면 `Thread.start()`가 아무 말 없이 블록을 실행하지 않아, 데몬의 다른 일까지 멈춘다.
-/// root 전용 폴더 읽기는 세지 않는다 — 한 사용자가 멈춘 읽기를 쌓아 시스템 검사까지 막지 못하게.
-private let liveThreads = Atomic<Int>(0)
-private let maxLiveThreads = 8
+/// 사용자별로 동시에 도는 스레드 수. 커널에서 멈춘 채 버려진 스레드도 센다. 쌓여서 프로세스의 스레드 한도에 닿으면
+/// `Thread.start()`가 아무 말 없이 블록을 실행하지 않아, 데몬의 다른 일까지 멈춘다.
+/// 사용자별로 세는 것은 한 사용자가 자기 폴더의 멈춘 마운트로 다른 사용자의 읽기를 막지 못하게 하려는 것이다.
+/// root 전용 폴더 읽기는 세지 않는다.
+private let userThreads = Mutex<[uid_t: Int]>([:])
+private let maxUserThreads = 8
 /// 모든 읽기 스레드의 마지막 상한. 정상이면 닿지 않는다 — root 읽기도 사용자 영역을 지나는 경로를 받으면 멈출 수 있다.
 private let allThreads = Atomic<Int>(0)
 private let maxAllThreads = 64
@@ -92,34 +93,48 @@ private let maxAllThreads = 64
 /// 한 번 쓰고 끝나는 스레드에서 `body`를 돌린다. 권한은 스레드 단위로 바뀌는데, 동시성 풀 스레드에서 바꾸면
 /// 되돌리지 못했을 때 다른 작업이 그 권한으로 돈다. 이 스레드는 바뀐 권한과 함께 사라진다.
 /// 파일 읽기가 커널에서 멈춰도(멈춘 네트워크 볼륨 등) 취소되면 스레드를 버리고 바로 돌아온다.
-/// - Parameter limited: 사용자가 고를 수 있는 경로면 true. 동시에 `maxLiveThreads`개를 넘으면 `.system(EAGAIN)`.
-func onDedicatedThread<T: Sendable>(limited: Bool, _ body: @escaping @Sendable () throws -> T) async throws -> T {
+/// - Parameter uid: 사용자가 고를 수 있는 경로면 그 사용자. 그 사용자 몫이 동시에 `maxUserThreads`개를 넘으면 `.system(EAGAIN)`.
+func onDedicatedThread<T: Sendable>(limitedTo uid: uid_t?, _ body: @escaping @Sendable () throws -> T) async throws -> T {
     try Task.checkCancellation()
     guard allThreads.add(1, ordering: .relaxed).newValue <= maxAllThreads else {
         allThreads.subtract(1, ordering: .relaxed)
         throw SafeFileError.system(EAGAIN)
     }
-    if limited {
-        guard liveThreads.add(1, ordering: .relaxed).newValue <= maxLiveThreads else {
-            liveThreads.subtract(1, ordering: .relaxed)
+    if let uid {
+        let admitted = userThreads.withLock { counts in
+            guard counts[uid, default: 0] < maxUserThreads else { return false }
+            counts[uid, default: 0] += 1
+            return true
+        }
+        guard admitted else {
             allThreads.subtract(1, ordering: .relaxed)
             throw SafeFileError.system(EAGAIN)
         }
+    }
+    let release: @Sendable () -> Void = {
+        if let uid {
+            userThreads.withLock { counts in
+                let left = counts[uid, default: 1] - 1
+                counts[uid] = left > 0 ? left : nil
+            }
+        }
+        allThreads.subtract(1, ordering: .relaxed)
     }
     let slot = ContinuationSlot<T>()
     return try await withTaskCancellationHandler {
         try await withCheckedThrowingContinuation { continuation in
             slot.store(continuation)
-            // 이미 취소된 채 들어왔으면 onCancel이 slot을 비우기 전에 돌았을 수 있다.
+            // 이미 취소된 채 들어왔으면 onCancel이 slot을 비우기 전에 돌았을 수 있다. 스레드는 띄우지 않는다.
             if Task.isCancelled {
+                release()
                 slot.take()?.resume(throwing: CancellationError())
+                return
             }
             Thread {
                 // 내려받지 않은 iCloud 파일은 내려받기를 기다리지 않고 바로 EDEADLK로 실패하게 한다.
                 _ = setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_THREAD, IOPOL_MATERIALIZE_DATALESS_FILES_OFF)
                 let result = Result { try body() }
-                if limited { liveThreads.subtract(1, ordering: .relaxed) }
-                allThreads.subtract(1, ordering: .relaxed)
+                release()
                 slot.take()?.resume(with: result)
             }.start()
         }
@@ -177,7 +192,6 @@ private func openUserFile(_ path: String, as user: UserRecord) throws -> (fd: In
     guard fd >= 0 else { throw openError(errno) }
     let info = try regularFileInfo(fd)
     guard info.st_uid == user.uid else { close(fd); throw SafeFileError.ownerMismatch }
-    guard info.st_nlink == 1 else { close(fd); throw SafeFileError.hardLink }
     return (fd, info)
 }
 
