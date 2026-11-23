@@ -1,6 +1,6 @@
 # 다음 세션 시작 프롬프트
 
-> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-9 완료 시점)
+> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-47 완료 시점)
 
 ```
 Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 루트
@@ -13,16 +13,17 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
 ## 현재 상태 (2026-11-23)
-- 문서 상태 `구현중`. WO-1~9 `[x]`, WO-10~46 `[ ]`.
+- 문서 상태 `구현중`. WO-1~9·WO-47 `[x]`, WO-48·WO-10~46 `[ ]`.
   - Phase 1(WO-1~7): 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구(`Tools/xpc-probe/`).
-  - Phase 2: WO-8 `CommandRunner`, WO-9 `SafeFileReader`·`UserDirectory`(`HaetaeKit/Sources/HaetaeChecks/Engine/`)까지. 둘 다 별도 에이전트 리뷰를 반영했다(WO-8은 재리뷰 3번까지 — 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). WO-9는 사용자 sudo로 root 경로도 확인했다. 단위 테스트는 WO-19에서 쓴다.
+  - Phase 2: WO-8 `CommandRunner`, WO-9 `SafeFileReader`·`UserDirectory`(`HaetaeKit/Sources/HaetaeChecks/Engine/`)까지. 둘 다 별도 에이전트 리뷰를 반영했다(WO-8은 재리뷰 3번까지 — 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). WO-9는 사용자 sudo로 root 경로도 확인했다. WO-47(해석 전용 프로세스 — `haetaed --parse plist`가 입력 전에 nobody로 내려감, sudo로 확인)까지 끝. 단위 테스트는 WO-19에서 쓴다.
 - Phase 1 검증: 7-1은 별도 에이전트가 끝냈다(구현 결함 0건). 남은 것은 사용자 확인뿐이다.
   - 7-2 R16(XPC 거부 결과를 받아들이는지) — 사용자 답 대기
   - 로그아웃 뒤 자동 실행(7-2 R2·R12, 7-1 P1 "등록 흐름"의 로그아웃 항목) — 사용자가 로그아웃했다고 하면 그 시각의 데몬 로그에 `markUserQuit`이 있는지 본다
   - "끄면 다음 로그인 때 안 뜬다"는 사용자 결정으로 건너뜀. "검증 실패 표시"는 Phase 6로 옮김.
   - 사용자 지시로 이 확인들을 남긴 채 Phase 2를 시작했다.
-- 정해졌고 바로 할 것: Q42 2번(사용자 파일 파싱을 권한을 내린 별도 프로세스로), 방식은 Q47 1번(데몬을 해석 모드로 다시 띄움)으로 결정됨(2026-11-23). WO-10 전에 새 WO 2개(해석 쪽, 데몬 쪽, 0장 6번)로 만든다. Q40(`launchctl asuser`)과 같은 "권한을 내린 자식 프로세스" 문제라 함께 보면 좋다.
+- 정해졌고 바로 할 것: Q42 2번(사용자 파일 파싱을 권한을 내린 별도 프로세스로), 방식은 Q47 1번(데몬을 해석 모드로 다시 띄움)으로 결정됨(2026-11-23). 해석 쪽 WO-47은 끝, 데몬 쪽 WO-48을 WO-10 전에 한다(본문 2-1의 필수 사항 — SIGPIPE, 깊이 사전 확인, cdhash `launchRequirement` — 를 꼭 지킨다). Q40(`launchctl asuser`)과 같은 "권한을 내린 자식 프로세스" 문제라 함께 보면 좋다.
 - 미정인 결정 (지금 작업은 막지 않는다):
+  - Q48(해석 프로세스가 데몬의 FDA를 물려받는 문제 — 남은 위험을 받아들일지) — 사용자에게 다시 묻는다. WO-47·48 코드에는 영향 없음.
   - Q45(`/private/var/at/jobs`가 daemon 소유) — WO-16 전.
   - Q40(`launchctl asuser`가 uid를 바꾸지 않음) — WO-26 전.
 - 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다. 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다.
@@ -44,5 +45,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 에이전트가 못 하는 것: sudo(사용자에게 터미널 명령을 주고 실행을 부탁), `sfltool dumpbtm`(인증 창에서 멈춤 — 실행 금지), 메뉴 막대 아이콘 클릭(패널 확인은 사용자에게 부탁, 화면이 잠겨 있으면 화면 도구가 아예 안 된다). `log show`는 `rtk proxy log show …`로 실행한다.
 
 ## 다음 할 일
-Q42 파싱 분리부터 만든다(사용자 지시 2026-11-23 — 빨리 막기). 새 WO 2개를 6장에 넣어 1회 1WO로 진행한다. 그다음 WO-10(지문·기준값·기록 저장소). `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
+WO-48(해석 전용 프로세스 — 데몬 쪽)부터 한다(사용자 지시 2026-11-23 — Q42를 빨리 막기). 그다음 WO-10(지문·기준값·기록 저장소). `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
 ```
