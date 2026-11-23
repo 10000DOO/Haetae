@@ -11,13 +11,19 @@ struct ServiceRegistrar {
 
     private let identity: AppIdentity?
     private let daemon = SMAppService.daemon(plistName: "com.10000DOO.haetaed.plist")
+    /// 사용자 파일을 해석하는 서비스(WO-49). 데몬과 함께 등록한다 — 없으면 해석이 필요한 검사가 모두 실패한다.
+    private let parser = SMAppService.daemon(plistName: "com.10000DOO.haetae-parser.plist")
     private let agent = SMAppService.agent(plistName: "com.10000DOO.Haetae.agent.plist")
 
     init(identity: AppIdentity?) {
         self.identity = identity
     }
 
-    var daemonStatus: SMAppService.Status { daemon.status }
+    /// 데몬 기준이다. 해석 서비스가 승인 대기면 같은 승인 안내를 띄운다. 없거나 등록에 실패했으면 데몬은 그대로 쓴다 —
+    /// 해석이 필요한 검사만 데몬이 검사 실패로 드러낸다(WO-50). 연결까지 막으면 다른 검사도 멈춘다.
+    var daemonStatus: SMAppService.Status {
+        daemon.status == .enabled && parser.status == .requiresApproval ? .requiresApproval : daemon.status
+    }
     /// "로그인 시 실행"의 실제 상태. 따로 저장한 값을 두지 않는다(`defaults write`로 바꿀 수 있는 값에 기대지 않는다).
     var isAgentRegistered: Bool { agent.status == .enabled }
     var agentNeedsApproval: Bool { agent.status == .requiresApproval }
@@ -51,10 +57,16 @@ struct ServiceRegistrar {
         if agent.status == .enabled { exit(0) }
     }
 
-    /// 데몬이 등록돼 있지 않으면 등록한다. 결과는 throw가 아니라 `daemonStatus`로 판단한다(승인 대기도 throw할 수 있다).
+    /// 데몬과 해석 서비스 중 등록돼 있지 않은 것을 등록한다. 결과는 throw가 아니라 `daemonStatus`로 판단한다(승인 대기도 throw할 수 있다).
     func registerDaemonIfNeeded() throws {
-        guard !isDaemonRegistered, canRegister() else { return }
-        try daemon.register()
+        let missing = [daemon, parser].filter { $0.status == .notRegistered || $0.status == .notFound }
+        guard !missing.isEmpty, canRegister() else { return }
+        // 하나가 승인 대기로 throw해도 나머지를 등록한다. 첫 오류를 돌려준다.
+        var firstError: (any Error)?
+        for service in missing {
+            do { try service.register() } catch { firstError = firstError ?? error }
+        }
+        if let firstError { throw firstError }
     }
 
     /// 사용자가 "로그인 시 실행"을 껐지만 아직 적용하지 않았다. agent를 바로 풀면 launchd가 실행 중인 앱을 끝내므로

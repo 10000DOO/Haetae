@@ -9,6 +9,8 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--parse" {
     ParserProcess.run(arguments: Array(CommandLine.arguments.dropFirst(2)))
 }
 
+let log = Logger(subsystem: CodeRequirements.parserIdentifier, category: "service")
+
 #if DEBUG
 let variant = CodeRequirements.Variant.debug
 #else
@@ -25,7 +27,19 @@ guard info["CFBundleIdentifier"] as? String == CodeRequirements.parserIdentifier
       CodeRequirements.compileStatus(requirement) == errSecSuccess,
       (try? CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: minBuild)) == errSecSuccess
 else {
-    Logger(subsystem: CodeRequirements.parserIdentifier, category: "service").fault("자기 신원 확인 실패 — 서비스를 열지 않음")
+    log.fault("자기 신원 확인 실패 — 서비스를 열지 않음")
     exit(78)
 }
+
+#if DEBUG
+// Q48 확인용(WO-51 7-1): 이 서비스가 TCC가 막는 파일을 열 수 있으면 데몬의 전체 디스크 접근이 따라온 것이다.
+// POSIX 권한으로는 누구나 읽을 수 있는 파일이라, 열리지 않으면 TCC가 막은 것이다. 계정과 그룹도 함께 남긴다.
+let probe = unsafe open("/Library/Application Support/com.apple.TCC/TCC.db", O_RDONLY | O_CLOEXEC)
+let probeResult = probe >= 0 ? "OPENED" : "errno \(errno)"
+if probe >= 0 { close(probe) }
+var groups = [gid_t](repeating: 0, count: 32)
+let groupCount = unsafe getgroups(Int32(groups.count), &groups)
+let groupList = groups.prefix(max(0, Int(groupCount))).map { String($0) }.joined(separator: ",")
+log.notice("probe: uid \(getuid(), privacy: .public) gid \(getgid(), privacy: .public) groups \(groupList, privacy: .public) TCC.db \(probeResult, privacy: .public)")
+#endif
 ParserService.run(daemonRequirement: requirement)
