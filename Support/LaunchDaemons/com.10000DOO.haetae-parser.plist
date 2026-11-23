@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.10000DOO.haetae-parser</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/haetae-parser</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.10000DOO.haetae-parser</key>
+		<true/>
+	</dict>
+	<key>UserName</key>
+	<string>nobody</string>
+	<key>GroupName</key>
+	<string>nobody</string>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.10000DOO.Haetae</string>
+	</array>
+</dict>
+</plist>

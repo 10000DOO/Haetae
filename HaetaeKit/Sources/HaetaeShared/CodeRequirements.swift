@@ -15,6 +15,7 @@ public enum CodeRequirements {
 
     public static let appIdentifier = "com.10000DOO.Haetae"
     public static let daemonIdentifier = "com.10000DOO.haetaed"
+    public static let parserIdentifier = "com.10000DOO.haetae-parser"
 
     /// 실패하면 호출한 쪽은 연결하지 않아야 한다. 요구사항 없이 `resume()`하면 아무 프로세스나 붙는다.
     public static func app(teamID: String, minBuild: Int, variant: Variant) throws(InputError) -> String {
@@ -23,6 +24,10 @@ public enum CodeRequirements {
 
     public static func daemon(teamID: String, minBuild: Int, variant: Variant) throws(InputError) -> String {
         try requirement(identifier: daemonIdentifier, teamID: teamID, minBuild: minBuild, variant: variant)
+    }
+
+    public static func parser(teamID: String, minBuild: Int, variant: Variant) throws(InputError) -> String {
+        try requirement(identifier: parserIdentifier, teamID: teamID, minBuild: minBuild, variant: variant)
     }
 
     /// 앱·데몬이 Info.plist에서 읽은 팀 ID를 자기 서명에 대조할 때 쓴다(`SecCodeCheckValidity`).
