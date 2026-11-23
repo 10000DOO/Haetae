@@ -63,7 +63,7 @@ public struct SafeFileReader: Sendable {
                 hasher.update(data: $0)
             }
             return FileMetadata(
-                sha256: hasher.finalize().map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined(),
+                sha256: lowercaseHex(hasher.finalize()),
                 // 읽는 사이 파일이 바뀌어도 해시와 크기가 같은 내용을 가리키게 한다.
                 size: Int64(total),
                 modified: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))

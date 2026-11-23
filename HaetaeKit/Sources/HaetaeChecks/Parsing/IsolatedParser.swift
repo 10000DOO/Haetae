@@ -70,7 +70,7 @@ public struct IsolatedParser: Sendable {
               let cdhash = (info as? [String: Any])?[kSecCodeInfoUnique as String] as? Data,
               // 위 cdhash는 디스크의 서명이다. 데몬이 뜬 뒤 파일을 바꿔 두면 바뀐 파일의 것이 나온다(리뷰 실측).
               // 실행 중인 코드가 이 cdhash인지 확인한다 — 다르면 공격자 파일을 요구사항으로 묶게 된다.
-              unsafe SecRequirementCreateWithString("cdhash H\"\(hex(cdhash))\"" as CFString, [], &running) == errSecSuccess,
+              unsafe SecRequirementCreateWithString("cdhash H\"\(lowercaseHex(cdhash))\"" as CFString, [], &running) == errSecSuccess,
               SecCodeCheckValidity(code, [], running) == errSecSuccess
         else { throw IsolatedParserError.unavailable }
         return (path, try LaunchCodeRequirement.allOf { CodeDirectoryHash(cdhash) })
@@ -133,9 +133,5 @@ public struct IsolatedParser: Sendable {
         }
         visit(value)
         return count
-    }
-
-    private static func hex(_ data: Data) -> String {
-        data.map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined()
     }
 }
