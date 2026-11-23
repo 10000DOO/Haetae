@@ -1,4 +1,5 @@
 import Foundation
+import LightweightCodeRequirements
 import Synchronization
 
 /// 명령을 한 번 실행한 결과. `stdout`·`stderr`는 각각 `maxBytes`까지만 담는다.
@@ -37,25 +38,44 @@ public actor CommandRunner {
 
     private var isBusy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private let selfExecutable: (path: String, requirement: LaunchCodeRequirement)?
 
-    public init() {}
+    /// - Parameter selfExecutable: 해석 전용 프로세스로 띄울 데몬 자신(WO-48). 이 경로 하나만 시스템 볼륨 밖이어도 되고,
+    ///   띄울 때 반드시 `requirement`(자기 cdhash)를 건다 — `/Applications`는 admin이 바꿀 수 있어서다.
+    public init(selfExecutable: (path: String, requirement: LaunchCodeRequirement)? = nil) {
+        self.selfExecutable = selfExecutable
+    }
+
+    /// `IsolatedParser`가 띄울 경로. 경로를 따로 넘기다 어긋나지 않게 러너가 가진 값을 쓴다.
+    public nonisolated var selfExecutablePath: String? { selfExecutable?.path }
 
     /// - Parameters:
     ///   - executable: `trustedPrefixes` 아래의 절대 경로. 링크 없이 닿는, 시스템 볼륨의 파일이어야 한다.
+    ///     `selfExecutable`의 경로는 예외다 — NUL만 확인하고 나머지는 커널의 서명 요구사항 확인으로 대신한다.
     ///   - args: 그대로 넘긴다. 디스크에서 읽은 값을 넣을 때는 옵션으로 읽히지 않게 호출하는 쪽이 `--` 뒤에 둔다.
+    ///   - stdin: 주면 전용 스레드에서 써 넣고 닫는다(출력 읽기와 교착하지 않게). 없으면 `/dev/null`.
+    ///     손자를 남기지 않는 명령에만 쓴다 — 그룹을 빠져나간 손자가 stdin을 쥐고 읽지 않으면 쓰기 스레드가 남는다.
     ///   - timeout: 넘으면 SIGTERM, 2초 뒤 SIGKILL. 돌아오기까지는 최대 `timeout` + 6초가 걸린다.
     ///   - maxBytes: `stdout`·`stderr` 각각의 상한.
     /// - Throws: 취소되면 `CancellationError`. 앞선 명령을 기다리는 동안에는 차례가 와야 취소를 본다.
-    public func run(_ executable: String, _ args: [String], timeout: Duration, maxBytes: Int) async throws -> CommandOutput {
-        // 문자 단위로 보면 결합 문자가 붙은 `..`을 놓치므로 바이트로 본다.
-        let path = executable.utf8
-        guard Self.trustedPrefixes.contains(where: { path.starts(with: $0.utf8) }),
-              !path.split(separator: UInt8(ascii: "/")).contains(where: { $0.elementsEqual("..".utf8) })
-        else { throw CommandError.executableNotAllowed }
+    ///   서명 요구사항에 맞지 않으면 throw하지 않고, 커널이 exec 때 SIGKILL한 종료 상태로 돌아온다.
+    public func run(_ executable: String, _ args: [String], stdin: Data? = nil, timeout: Duration, maxBytes: Int) async throws -> CommandOutput {
         // NUL이 있으면 Foundation이 ObjC 예외를 던진다. Swift에서 잡을 수 없어 데몬이 죽으므로 지우면 안 된다.
         guard !([executable] + args).contains(where: { $0.contains("\0") }) else { throw CommandError.nulInArgument }
-        // 접두어는 대소문자·유니코드 변형으로 우회되므로 firmlink 예외는 이름이 아니라 파일이 있는 볼륨으로 거른다.
-        guard Self.isOnSystemVolume(executable) else { throw CommandError.executableNotAllowed }
+        let requirement: LaunchCodeRequirement?
+        // 다른 비교처럼 바이트로 본다(`==`는 유니코드 정규 동치까지 같게 본다).
+        if let selfExecutable, executable.utf8.elementsEqual(selfExecutable.path.utf8) {
+            requirement = selfExecutable.requirement
+        } else {
+            // 문자 단위로 보면 결합 문자가 붙은 `..`을 놓치므로 바이트로 본다.
+            let path = executable.utf8
+            guard Self.trustedPrefixes.contains(where: { path.starts(with: $0.utf8) }),
+                  !path.split(separator: UInt8(ascii: "/")).contains(where: { $0.elementsEqual("..".utf8) }),
+                  // 접두어는 대소문자·유니코드 변형으로 우회되므로 firmlink 예외는 이름이 아니라 파일이 있는 볼륨으로 거른다.
+                  Self.isOnSystemVolume(executable)
+            else { throw CommandError.executableNotAllowed }
+            requirement = nil
+        }
         precondition(maxBytes >= 0, "maxBytes는 0 이상")
 
         // actor는 await 사이에 다른 호출을 받으므로, 한 번에 하나만 돌리려면 차례를 직접 세운다.
@@ -68,18 +88,23 @@ public actor CommandRunner {
             if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().resume() }
         }
         try Task.checkCancellation()
-        return try await Self.execute(executable, args, timeout: timeout, maxBytes: maxBytes)
+        return try await Self.execute(executable, args, stdin: stdin, requirement: requirement, timeout: timeout, maxBytes: maxBytes)
     }
 
     private enum Event { case exited, eof, timeout, killDeadline, abandon, drainDeadline }
 
-    private static func execute(_ executable: String, _ args: [String], timeout: Duration, maxBytes: Int) async throws -> CommandOutput {
+    private static func execute(
+        _ executable: String, _ args: [String], stdin: Data?, requirement: LaunchCodeRequirement?, timeout: Duration, maxBytes: Int
+    ) async throws -> CommandOutput {
         let process = Process()
         process.executableURL = URL(filePath: executable)
         process.arguments = args
         process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"]
         process.currentDirectoryURL = URL(filePath: "/")
-        process.standardInput = FileHandle.nullDevice
+        // 커널이 exec 때 확인한다 — 확인과 실행 사이에 파일을 바꿔치기할 틈이 없다.
+        process.launchRequirement = requirement
+        let input = stdin.map { _ in Pipe() }
+        process.standardInput = input ?? FileHandle.nullDevice
         let pipes = [Pipe(), Pipe()]
         let buffers = [CappedBuffer(limit: maxBytes), CappedBuffer(limit: maxBytes)]
         process.standardOutput = pipes[0]
@@ -89,6 +114,20 @@ public actor CommandRunner {
         process.terminationHandler = { _ in sink.yield(.exited) }
         try process.run()
         let pid = process.processIdentifier
+        if let input, let stdin {
+            // Foundation은 부모 쪽 읽기 끝을 닫으므로, 자식이 먼저 끝나면 쓰기가 EPIPE로 끝난다.
+            // 그때 SIGPIPE가 오면 root 데몬이 죽으므로 이 fd에서는 끈다.
+            let writer = input.fileHandleForWriting
+            if fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 {
+                Thread {
+                    writeAll(stdin, to: writer.fileDescriptor)
+                    try? writer.close()
+                }.start()
+            } else {
+                // 막지 못하면 쓰지 않는다. 자식은 빈 입력을 받아 실패로 끝난다.
+                try? writer.close()
+            }
+        }
         for (pipe, buffer) in zip(pipes, buffers) {
             let fd = pipe.fileHandleForReading.fileDescriptor
             pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -214,5 +253,21 @@ private final class CappedBuffer: Sendable {
 
     func snapshot() -> (data: Data, truncated: Bool) {
         state.withLock { ($0.data, $0.truncated) }
+    }
+}
+
+/// EINTR이 아닌 오류(자식이 먼저 닫음 — EPIPE)가 나면 그만둔다. 자식의 실패는 종료 상태로 드러난다.
+private func writeAll(_ data: Data, to fd: Int32) {
+    var offset = 0
+    while offset < data.count {
+        // offset < count라 baseAddress가 있고, 남은 길이만 넘긴다.
+        let written = unsafe data.withUnsafeBytes { unsafe write(fd, $0.baseAddress! + offset, $0.count - offset) }
+        if written > 0 {
+            offset += written
+        } else if written < 0, errno == EINTR {
+            continue
+        } else {
+            return
+        }
     }
 }
