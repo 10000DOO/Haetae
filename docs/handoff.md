@@ -1,6 +1,6 @@
 # 다음 세션 시작 프롬프트
 
-> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-10 완료 시점)
+> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-49 완료 시점)
 
 ```
 Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 루트
@@ -13,7 +13,7 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
 ## 현재 상태 (2026-11-23)
-- 문서 상태 `구현중`. WO-1~10·WO-47·48 `[x]`, WO-11~46 `[ ]`.
+- 문서 상태 `구현중`. WO-1~10·WO-47·48·49 `[x]`, WO-50·51·WO-11~46 `[ ]`.
   - Phase 1(WO-1~7): 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구(`Tools/xpc-probe/`).
   - Phase 2: WO-8 `CommandRunner`, WO-9 `SafeFileReader`·`UserDirectory`(`HaetaeKit/Sources/HaetaeChecks/Engine/`)까지. 둘 다 별도 에이전트 리뷰를 반영했다(WO-8은 재리뷰 3번까지 — 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). WO-9는 사용자 sudo로 root 경로도 확인했다. WO-47·48(해석 전용 프로세스 — `haetaed --parse plist`가 입력 전에 nobody로 내려감(sudo로 확인), 데몬은 자기 cdhash에 묶어서만 띄우는 `IsolatedParser`)까지 끝. 단위 테스트는 WO-19에서 쓴다.
 - Phase 1 검증: 7-1은 별도 에이전트가 끝냈다(구현 결함 0건). 남은 것은 사용자 확인뿐이다.
@@ -46,5 +46,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 에이전트가 못 하는 것: sudo(사용자에게 터미널 명령을 주고 실행을 부탁), `sfltool dumpbtm`(인증 창에서 멈춤 — 실행 금지), 메뉴 막대 아이콘 클릭(패널 확인은 사용자에게 부탁, 화면이 잠겨 있으면 화면 도구가 아예 안 된다). `log show`는 `rtk proxy log show …`로 실행한다.
 
 ## 다음 할 일
-Q54 1번(해석기를 launchd가 띄우는 별도 데몬으로 — Q48 2번 결정)의 설계안을 먼저 만든다. 새 WO(해석 서비스 쪽, 데몬 쪽, 앱 등록 쪽 — 0장 6번)를 6장에 쓰고 사용자에게 보여 확인받은 뒤 1회 1WO로 구현한다. 같은 실행 파일을 다른 방법으로 띄우면 TCC 권한이 따라가므로(코드 서명 정체로 판단) 별도 실행 파일(새 타깃)이 필요하다. WO-47·48의 `ParserProcess.respond`·`ParsedValue`·`IsolatedParser`의 출력 검증은 다시 쓰고, `haetaed --parse` 분기·`CommandRunner` 자기 실행 파일 허용·stdin은 새 방식에서 필요 없으면 지운다. 그다음 WO-11. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
+WO-50(해석 서비스 — 데몬 쪽: `IsolatedParser`를 XPC 클라이언트로, `haetaed --parse` 분기 삭제)부터 한다. 그다음 WO-51(앱 등록 쪽 — 사용자가 새 빌드를 sudo로 설치·승인하고, haetaed에 전체 디스크 접근을 준 상태에서 해석 서비스가 시스템 `TCC.db`를 못 여는지 확인해야 한다). 해석 서비스는 새 타깃 `haetae-parser`(WO-49)이고 방식과 실측은 6장 WO-49, 주의사항은 8장 "해석 서비스" 항목에 있다. 그다음 WO-11. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
 ```

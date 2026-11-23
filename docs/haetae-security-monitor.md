@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-23 · 브랜치: `main` · 다음 액션: Q54 1번(해석기를 launchd가 띄우는 별도 데몬으로) 설계안 — 새 WO들을 6장에 쓰고 사용자 확인을 받은 뒤 구현, 그다음 WO-11. Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-23 · 브랜치: `main` · 다음 액션: WO-50(해석 서비스 — 데몬 쪽) → WO-51(앱 등록 쪽, 사용자 sudo 설치·FDA 확인 필요) → WO-11. Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -813,6 +813,7 @@ sequenceDiagram
 
 ### WO-12: 데몬 `CollectService` 완성과 자기 무결성 (D20, D24, D27, D29)
 - 상태: [ ] 대기
+- 신원 확인 모으기(WO-49 리뷰): 내장 Info.plist 읽기·식별자 확인·`selfSignatureStatus`가 데몬(`DaemonConfiguration.load`)·앱(`AppIdentity`)·해석 서비스(`haetae-parser/main.swift`)에 세 벌 있다. `DaemonConfiguration`을 옮길 때 `HaetaeShared`의 함수 하나로 모으고 세 곳이 그것을 쓰게 한다(각자 필요한 요구사항과 로그만 남김).
 - WO-48 연결: 시작할 때 `IsolatedParser.selfExecutable()`로 `CommandRunner(selfExecutable:)`를 하나 만든다. 실패하면 `CommandRunner()`로 띄우고, 해석이 필요한 검사는 `IsolatedParserError.unavailable`을 검사 실패 1건으로 드러낸다.
 - 의존: WO-11, WO-4
 - 충족: R18, R16, R2
@@ -1121,7 +1122,7 @@ sequenceDiagram
 
 ### WO-46: 개발용 데몬 등록 정리
 - 상태: [ ] 대기 · 의존: WO-45 · 충족: R16
-- 변경: 개발 중 `/Applications/Haetae.app`(Debug 사본, Q33)으로 등록된 root 데몬과 에이전트를 그 앱에서 `unregister()`하고, `sfltool dumpbtm`에서 사라졌는지 확인한다(8장). DerivedData 경로 등록은 처음부터 하지 않는다.
+- 변경: 개발 중 `/Applications/Haetae.app`(Debug 사본, Q33)으로 등록된 root 데몬·해석 서비스(`com.10000DOO.haetae-parser`, WO-51)와 에이전트를 그 앱에서 `unregister()`하고, `sfltool dumpbtm`에서 사라졌는지 확인한다(8장). DerivedData 경로 등록은 처음부터 하지 않는다.
 - 완료 판정: `sfltool dumpbtm`에 Debug 빌드 항목과 DerivedData 경로 항목 없음(`sfltool dumpbtm`은 관리자 인증 창을 띄우고 기다린다 — 에이전트가 돌리면 멈추므로 사용자가 실행한다)
 
 ### WO-47: 해석 전용 프로세스 — 해석 쪽 (Q42, Q47, D26, T23)
@@ -1155,6 +1156,42 @@ sequenceDiagram
   3. WO-11 `CheckContext`에 `parser: IsolatedParser`를 더한다. haetaed는 `IsolatedParser.selfExecutable()`의 결과로 `CommandRunner`를 만든다 — 실제 연결은 WO-12에서. `selfExecutable()`은 디스크에서 읽은 cdhash가 실행 중인 코드의 것인지 `SecCodeCheckValidity`(`cdhash H"…"` 요구사항)로 확인한다 — 데몬이 뜬 뒤 파일을 바꿔 두면 디스크 값은 공격자 것이다(리뷰 실측).
 - 금지: 데몬 안에서 공격자가 쓸 수 있는 파일을 `PropertyListSerialization`·`PropertyListDecoder`·`JSONSerialization`·`JSONDecoder`·`ParserProcess.parse`·`ParserProcess.respond`로 직접 해석하지 않는다(해석 프로세스의 출력만 예외 — 깊이 확인 뒤 `JSONWire.decode`).
 - 완료 판정: `swift build` 경고 0. 빌드된 haetaed를 `IsolatedParser`로 띄워 plist를 해석하는지, 해석 프로세스가 죽음·시간 초과·출력 초과·깊은 중첩 출력일 때 실패로 돌아오는지, 그 경로에 서명이 다른 실행 파일(ad-hoc 서명 사본)을 두면 띄우기가 실패하는지 실측.
+
+### WO-49: 해석 서비스 — 서비스 쪽 (Q48 2번, Q54 1번, D26, T23)
+- 상태: [x] 완료 (2026-11-23) — `swift build`·`xcodebuild -scheme Haetae` 성공(컴파일 경고 0). 확인: 번들에 `Contents/MacOS/haetae-parser`와 `Contents/Library/LaunchDaemons/com.10000DOO.haetae-parser.plist`, 서명 ID `com.10000DOO.haetae-parser`(데몬과 다름)·같은 팀·hardened runtime, `codesign --verify --deep --strict` 통과, `haetae-parser --parse plist` 정상, 임시 launchd 작업(사용자 도메인, 끝나고 지움)으로 서비스 모드를 띄우니 자기 신원 확인을 통과해 떠 있고 데몬이 아닌 클라이언트의 요청은 거부(4097), 요청 없이 30초가 지나면 스스로 끝나고(exit 0) 다음 연결 때 0.07초 만에 다시 뜸. 최종 재확인 둘 다 "커밋해도 됨". nobody로 뜨는지와 TCC 연결이 끊기는지는 WO-51 등록 뒤 확인
+- 의존: WO-47, WO-48
+- 충족: R1(T23)
+- 순서: WO-11보다 먼저. 데몬 쪽은 WO-50, 앱 등록 쪽은 WO-51(0장 6번).
+- 왜: TCC는 권한을 계정이 아니라 코드 서명 정체와 "책임 프로세스"로 판단한다. 데몬이 자기 실행 파일을 다시 띄우면(WO-47·48) 같은 정체·같은 책임이라 데몬의 FDA가 따라간다. 서명 정체가 다른 별도 실행 파일을 launchd가 띄우면 책임 프로세스가 자기 자신이 된다(확실하지 않음 — WO-51의 7-1 항목에서 실측).
+- 방식(구현 중 실측으로 바꿈, 2026-11-23): 처음 안은 "요청 하나마다 서비스가 끝나고 launchd가 다시 띄움"이었다. 임시 launchd 작업으로 재 보니 다시 띄우기까지 기본 10.05초, `ThrottleInterval = 0`이어도 1.05초가 걸린다(파일당 1초). 그래서 서비스는 떠 있으면서 **파일마다 자기 실행 파일을 `--parse`로 띄운다**(WO-47·48의 구조를 nobody 서비스 안으로 옮긴 것 — 파일당 약 6ms). 서비스 자신은 바이트를 나르기만 하고 해석하지 않는다. 별도 서명 정체·launchd 실행·nobody·파일당 프로세스 하나는 그대로다.
+- 대상: `haetae-parser/main.swift`(새 Xcode 명령줄 타깃 `haetae-parser`), `HaetaeKit/Sources/HaetaeChecks/Parsing/ParserService.swift`, `HaetaeKit/Sources/HaetaeShared/HaetaeParserXPC.swift`, `CodeRequirements.swift`(`parserIdentifier`·`parser`), `Support/LaunchDaemons/com.10000DOO.haetae-parser.plist`, `Haetae.xcodeproj/project.pbxproj`
+- 변경:
+  1. launchd plist: `Label`·`BundleProgram`(`Contents/MacOS/haetae-parser`)·`MachServices`·`UserName`/`GroupName` = `nobody`·`Umask`·`AssociatedBundleIdentifiers`.
+  2. 새 타깃 `haetae-parser`: 빌드 설정은 `haetaed`와 같고(배포 타깃 15.0, hardened runtime, 같은 팀, Release는 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO`) 서명 ID만 `com.10000DOO.haetae-parser`. Info.plist 틀은 `Support/haetaed-Info.plist`를 같이 쓴다(값이 모두 빌드 설정에서 온다). `HaetaeShared`·`HaetaeChecks`를 링크한다(해석 자식과 `CommandRunner`를 그대로 쓰려고 — 데몬 실행 파일이 해석기였던 WO-47보다 코드가 늘지 않는다). 앱 타깃이 의존하고 `Copy haetaed`(Executables)·`Copy LaunchDaemons`에 넣는다.
+  3. `main.swift`: 인자가 `--parse`면 `ParserProcess.run`(해석 자식, WO-47). 아니면 내장 Info.plist의 팀 ID·최소 빌드로 데몬 요구사항을 만들고 자기 서명과 대조한 뒤(데몬과 같은 방식, 어긋나면 exit 78) `ParserService.run(daemonRequirement:)`.
+  4. `ParserService.run`: `dropPrivileges()`(plist의 `UserName`이 먹지 않아 root로 떴어도 내림) → 자기 cdhash 요구사항으로 `CommandRunner(selfExecutable:)` → `NSXPCListener`, 연결마다 `setCodeSigningRequirement`(데몬만)와 `Session` 하나. 연결이 끊기면 그 연결의 요청을 취소한다(데몬이 기다리다 끊은 요청이 줄을 서서 다음 파일을 늦추지 않게). 진행 중인 요청이 없고 30초 동안 요청이 없으면 `exit(0)` — 계속 떠 있으면 앱 업데이트 뒤 옛 실행 파일로 남아 자식을 띄울 때마다 cdhash가 달라 막힌다(D15와 같은 이유). 요청 `parse(_:format:withReply:)`: 입력 상한·형식 확인 → 자식 `--parse <형식>`(타임아웃 5초, 출력 상한) → `reply(결과?, 해석기를 쓸 수 없음)`. 시간 초과가 아닌 SIGKILL(서명 요구사항)과 띄우기 실패는 "쓸 수 없음"으로 답한다.
+  5. `HaetaeParserXPCProtocol`·`HaetaeParserXPC.machServiceName`·`CodeRequirements.parser`를 `HaetaeShared`에 둔다.
+- 금지: 서비스 프로세스(부모)에서 입력을 해석하지 않는다. 결과는 XPC 답으로만 내보낸다.
+- 리뷰 (2026-11-23, 별도 에이전트 2개: 보안, 설계·동시성): Critical 0, 구조는 맞음(서비스는 바이트만 나름, 자식은 cdhash에 묶임, 데몬 요구사항으로 거름, Release 설정은 haetaed와 같음). High 1 조치 — 서비스가 끝나지 않아 앱 업데이트 뒤 재부팅 전까지 해석이 모두 `unavailable`이 되던 것(유휴 30초 종료, 다시 뜨는 데 0.07초 실측). Medium 조치 — 끊긴 연결의 요청 취소(`Session`), WO-50 지시 보강. 그대로 둔 것 — `ParserService`를 패키지에 둠(타깃으로 옮기면 `dropPrivileges`를 public으로 열어야 함), 신원 확인 코드 세 벌(데몬·앱·해석 서비스)은 `DaemonConfiguration`을 옮기는 WO-12에서 `HaetaeShared`로 모음. 알려진 한계(사용자가 승인한 "nobody로 띄움"을 유지 — 보안 리뷰 추천): launchd가 `UserName nobody`로 띄우면 nobody의 디렉터리 그룹이 딸려 온다(이 맥 `id -G nobody` = -2 12 61 702 100 701 — WO-47에서 root로 실측한 `getgroups == [nobody]`는 이 경로에 해당하지 않음). 자식과 서비스가 같은 uid라 뚫린 자식이 서비스에 시그널을 보낼 수 있다(결과는 `unavailable`·타임아웃으로 드러남). 실제 그룹은 WO-51에서 기록.
+- 완료 판정: `xcodebuild -scheme Haetae` 성공·경고 0, 번들 안에 실행 파일과 plist, `codesign -dv`로 서명 ID가 데몬과 다름, 데몬이 아닌 클라이언트 거부.
+
+### WO-50: 해석 서비스 — 데몬 쪽 (Q48 2번, Q54 1번)
+- 상태: [ ] 대기
+- 의존: WO-49, WO-48
+- 충족: R1(T23)
+- 대상: `HaetaeKit/Sources/HaetaeChecks/Parsing/IsolatedParser.swift`, `ParserService.swift`, `haetaed/main.swift`
+- 변경:
+  1. `IsolatedParser.parse`: 파일마다 `NSXPCConnection(machServiceName: HaetaeParserXPC.machServiceName, options: .privileged)`를 열고 `setCodeSigningRequirement(CodeRequirements.parser(…))`(그 서비스만 믿음), 타임아웃, 답을 받으면 연결을 닫는다. 받은 출력은 WO-48과 같이 검증한다(첫 바이트·깊이·객체·쉼표 → `JSONWire.decode` → 노드 수). 대기는 `withTaskCancellationHandler` 안의 `withCheckedThrowingContinuation`으로 만들고 resume은 `Mutex`로 한 번만 한다(답·에러 핸들러·타임아웃·취소가 겹칠 수 있다 — `SafeFileReader`의 `ContinuationSlot` 방식). 타임아웃은 서비스 한 건의 최대 시간(자식 5초 + 정리 6초)보다 긴 15초 — 짧으면 느린 파일이 `failed`가 아니라 `unavailable`이 된다. 타임아웃·취소면 `connection.invalidate()`(서비스가 그 요청을 취소한다). 서비스가 유휴 종료하는 순간과 겹쳐 연결이 끊기면(`NSXPCConnectionInterrupted`·`Invalid`) 한 번만 다시 시도한다. 답의 뒤 값이 true면 데이터가 있어도 `unavailable`. 요구사항 문자열은 `DaemonConfiguration.load`가 `CodeRequirements.parser`로 만든다. 에러: `failed`(연관 값 없이 — 종료 코드는 서비스가 넘기지 않는다)·`invalidOutput`은 그 파일의 Finding, 연결 실패·서명 불일치·타임아웃·서비스가 "쓸 수 없음"이라 답함은 `unavailable`(검사 실패 1건). `init`은 요구사항 문자열을 받는다(데몬이 시작할 때 만든 것 — WO-12).
+  2. 데몬에서 지우는 것: `haetaed --parse` 분기. `IsolatedParser.selfExecutable()`은 `ParserService` 안으로 옮긴다(서비스만 쓴다). `CommandRunner`의 자기 실행 파일 허용·stdin은 서비스가 쓰므로 남긴다. WO-12 "WO-48 연결" 줄과 8장을 고친다.
+- 완료 판정: `swift build`·`xcodebuild` 경고 0. 임시 launchd 작업으로 띄운 서비스에 (요구사항을 통과하는 시험 클라이언트로) plist를 해석시키는지, 서비스가 아닌 프로세스가 같은 이름으로 답하면 거부하는지, 서비스가 죽거나 늦으면 `unavailable`인지 실측.
+
+### WO-51: 해석 서비스 — 앱 등록 쪽 (Q54 1번, D28)
+- 상태: [ ] 대기
+- 의존: WO-49
+- 대상: `Haetae/ServiceRegistrar.swift`
+- 변경: 데몬과 같은 흐름으로 `SMAppService.daemon(plistName: "com.10000DOO.haetae-parser.plist")`를 등록·상태 확인한다(승인 필요, root 소유 번들에서만 — Q33). 해제는 데몬과 같은 때.
+- 완료 판정: `xcodebuild` 경고 0. 사용자가 root 사본으로 설치(8장 sudo 명령)·승인한 뒤 `launchctl print system/com.10000DOO.haetae-parser`에 등록이 보이고, 서비스와 해석 자식의 uid가 nobody인지(`ps`).
+- 7-1 추가(사용자 손이 필요): haetaed에 "전체 디스크 접근"을 준 상태에서 해석 서비스(와 그 자식)가 시스템 `TCC.db`를 열지 못하는지 — Q48 2번이 실제로 막히는지 확인하는 항목. 막히지 않으면 9장에 올린다. plist의 `UserName`이 `SMAppService` 데몬에서 먹는지도 여기서 확인한다(안 먹어도 `dropPrivileges`가 내린다).
 
 ## 7. 검증 계획
 
@@ -1309,6 +1346,7 @@ sequenceDiagram
 - 해석 전용 프로세스(WO-47): `haetaed --parse plist`(JSON은 WO-32, sqlite는 WO-28이 더함). 종료 코드 0 성공, 64 인자 오류, 65 입력이 잘못됐거나 상한 초과, 77 권한 내리기·자원 상한 실패. 파일 쓰기 상한이 0(`RLIMIT_FSIZE`)이라 stdout은 반드시 파이프여야 한다 — 파일로 돌리면 시그널 25(`SIGXFSZ`)로 죽는다(2026-11-23 실측, 셸에서 시험할 때는 `| cat`). `ParsedValue`의 전송 형식은 값마다 키 하나짜리 태그 객체이고, 사전 순서가 정해져 있지 않아 같은 값도 인코딩 바이트가 다를 수 있다 — 비교는 값으로 한다. `ParserProcess.dropPrivileges`·`limitResources`는 root 실측 도구가 같은 소스를 컴파일해 부르려고 internal이다 — 검사에서 부르지 않는다. fd 상한 3은 경계가 아니다 — 뚫린 코드가 0·1·2 중 하나를 닫으면 `open`·`socket`·exec가 모두 된다(2026-11-23 보안 재리뷰 실측). 해석 프로세스가 뚫렸을 때 막는 것은 nobody 권한과 fork 금지뿐이다(Q48). Int64를 넘는 정수는 `.double`로 온다 — 정수를 보는 검사는 `.double`도 받는다. 같은 태그가 두 번 든 객체(`{"s":…,"s":…}`)는 `JSONDecoder`가 하나로 합쳐 거부하지 못한다 — 해석 프로세스가 뚫렸을 때만 생기고 그때는 출력 전체가 공격자 것이라 영향이 없다.
 - `IsolatedParser`·`CommandRunner(selfExecutable:)`(WO-48): 데몬은 시작할 때 `IsolatedParser.selfExecutable()`로 경로와 cdhash 요구사항을 얻어 `CommandRunner`를 하나 만들고, `IsolatedParser(runner:)`는 그 러너의 경로를 쓴다(WO-12). 디스크의 빌드가 바뀌면 다음 데몬 실행 전까지 해석이 `unavailable`이다(검사 실패 1건). `failed`·`invalidOutput`은 그 파일의 Finding으로 남긴다(공격자가 일부러 해석 실패를 만들 수 있다). 종료 코드는 뚫린 자식이 고를 수 있으니 Finding 수준을 정하는 데 쓰지 않는다. cdhash는 슬라이스마다 다르다 — universal 파일을 시험할 때 `SecStaticCodeCreateWithPath`의 기본 슬라이스가 실제로 실행되는 슬라이스와 다를 수 있다(`/bin/echo`는 기본 슬라이스 cdhash로 묶으면 arm64e로 실행되며 SIGKILL, 2026-11-23 실측). `selfExecutable()`은 실행 중인 코드에서 얻으므로 해당이 없을 것으로 보지만, Release(arm64·x86_64) 빌드로 7-1에서 확인한다. plist 해석기는 예전 OpenStep 텍스트 형식도 받는다 — 따옴표 없는 `junk`도 문자열 하나로 해석된다. 검사는 기대한 타입인지 확인한다. `run(…, stdin:)`은 입력을 전용 스레드에서 쓰고 `F_SETNOSIGPIPE`를 건다 — `Process`를 직접 쓰지 않는 규칙이 여기서도 중요하다(SIGPIPE로 root 데몬이 죽는다).
 - 저장소(WO-10): `FindingLedger`는 디스크에 못 써도 throw하지 않는다 — 결과는 메모리 기준으로 돌려주고 `persistenceFailure`를 남긴다(디스크가 꽉 차도 탐지는 앱에 가게). `SecureDirectory.write`는 `F_FULLFSYNC`(macOS의 `fsync`는 드라이브 캐시를 비우지 않는다). 지문은 각 부분 앞에 UTF-8 길이를 붙여 이어 붙인 것의 SHA-256 — 구분 문자를 쓰지 않아 바깥에서 온 값(TeamID 등)에 어떤 글자가 있어도 안전하다. 데몬의 저장은 모두 `SecureDirectory`를 거친다(루트 `/Library/Application Support/Haetae`, 테스트는 `/private/var/folders/…` 임시 경로 주입). 기준값은 `baseline/<uid>/<checkID>.json`(Q50). `FindingLedger.setLastSuccess`는 그 실행의 Finding을 `filterNew`로 넣은 뒤에 부른다. 기준값 확정(`BaselineStore.confirmPending`)은 `FindingLedger.hasPending(checkID:uid:)`이 false일 때만 한다. `resolved`에는 이번에 성공한 검사만 넘긴다 — 실패한 검사의 지문을 해결로 보내면 안 된다. 지문의 `subject`는 글자로만 정규화하니 검사는 `/private/…`처럼 실제 경로를 넘긴다.
+- 해석 서비스(WO-49): launchd는 금방 끝난 작업을 다시 띄울 때 기본 10초, `ThrottleInterval = 0`이어도 1초를 기다린다(2026-11-23 실측) — 요청마다 끝나는 서비스는 쓸 수 없다. 10초 넘게 떠 있다 끝난 서비스는 바로(0.07초) 다시 뜬다(유휴 30초 종료는 문제없음). 서비스와 해석 자식은 같은 uid(nobody)다 — 뚫린 자식이 서비스를 죽이거나 멈출 수 있고, 그 결과는 `unavailable`·타임아웃으로 드러난다. `haetae-parser`는 서비스 모드(인자 없음, launchd가 nobody로 띄움)와 해석 자식 모드(`--parse plist`, 서비스가 파일마다 띄움)가 있다. `Support/haetaed-Info.plist`는 데몬과 해석 서비스가 같이 쓰는 틀이다(값은 타깃의 빌드 설정에서 옴). pbxproj를 손으로 고친 뒤에는 `plutil -lint Haetae.xcodeproj/project.pbxproj`로 먼저 확인한다(새 ID는 `70A4FE…`). 임시 launchd 작업으로 시험할 때는 `launchctl bootstrap gui/$(id -u) <plist>` → 시험 → `launchctl bootout gui/$(id -u)/<label>`(sudo 없이 됨, 끝나면 반드시 지운다).
 - Xcode가 패키지 library product마다 스킴(`HaetaeShared`·`HaetaeChecks`·`HaetaeAppCore`)을 자동으로 보여준다. 빌드·검증은 `Haetae`·`haetaed` 스킴으로만 한다.
 - 커밋은 Phase 완료 판정(7-1 + 7-2)을 통과한 뒤에 한다. 예외: 2026-11-19 사용자 지시로 WO-1 뒤 중간 커밋 3개와 push. 커밋 작성자 이메일은 저장소 로컬 설정(개인 이메일)이다 — 전역 설정은 회사 메일이라 public 저장소에 노출되지 않게 바꿨다. `DerivedData/`, `xcuserdata/`는 `.gitignore`로 제외돼 있고, `Package.resolved`는 커밋한다(D16).
 
@@ -1366,7 +1404,7 @@ sequenceDiagram
 | Q46 | 사용자 파일의 "링크 수 1" 규칙도 역효과 (D25, Q43과 같은 패턴) | 최종 코드 리뷰(2026-11-23) 지적. 홈 폴더가 `staff` 그룹에 열려 있어(`drwxr-x---`, 일반 사용자는 모두 `staff`) 비관리자 사용자 B가 `ln /Users/A/.zshrc /tmp/x`로 A 파일의 링크 수를 2로 만들 수 있음 → A의 `~/.zshrc` 읽기가 매번 `.hardLink`, 3회면 "높음" 오탐. `/tmp`는 sticky라 A가 그 링크를 못 지움(다른 계정으로 직접 재현은 안 함, 같은 계정의 `/tmp` 하드링크는 확인). 남의 파일·root 파일에 건 링크는 소유자 검사와 사용자 권한 전환이 이미 막고, 내 파일에 건 링크는 읽어도 해가 없음. 1) 사용자 파일도 링크 수를 보지 않음(`hardLink` case 삭제, D25·T4·8장·WO-19 갱신) — Claude 추천 / 2) 그대로(오탐 감수) | 1번 (2026-11-23) — WO-9 후속 수정에서 반영함 |
 | Q47 | 파싱 분리(Q42 2번)를 어떻게 만들지 | 공통: 데몬이 `SafeFileReader`로 읽은 바이트를 "해석 전용 프로세스"의 stdin으로 넘기고, 결과는 정해진 단순 JSON(크기 상한)으로 받아 데몬이 Swift로 엄격히 검사. 해석 프로세스는 공격자 입력을 읽기 전에 `setgroups`·`setgid`·`setuid`로 `nobody`(-2)까지 권한을 영구히 내리고 `setuid(0)`이 실패하는지 확인 — 뚫려도 공격자가 얻는 권한이 원래 자기 권한보다 작다. 파일 하나에 프로세스 하나(다른 파일의 결과를 조작하지 못하게), 시간·크기 상한. 대상은 plist·JSON·sqlite(`sqlite3_deserialize`로 바이트에서 엶). 셸 기록·rc 같은 텍스트는 데몬 안에서 Swift 문자열로 줄 단위 검사(메모리 안전). SDK 확인: 공개 API로는 `posix_spawn`에서 uid를 바꿀 수 없어 자식이 스스로 내린다. `sandbox_init`은 macOS 10.8부터 deprecated("No longer supported")라 쓰지 않는다. 0장 6번에 따라 WO 2개(해석 쪽, 데몬 쪽)로 나누고 WO-10 앞에 둔다. 권한 내리기는 root가 필요해 사용자 sudo로 실측. 1) 데몬 실행 파일을 해석 모드로 다시 띄움(`haetaed --parse <형식>`, `main` 맨 앞에서 갈라짐) — 새 타깃·서명 설정 없음, Claude 추천 / 2) 해석만 하는 별도 실행 파일(새 Xcode 타깃) — 해석 프로세스에 데몬 코드가 없고 App Sandbox entitlement를 시도할 수 있음(root가 띄우고 nobody로 내린 명령줄 도구에 샌드박스가 먹는지는 확실하지 않음), 빌드 설정 변경 필요 | 1번 (2026-11-23) — 핵심 방어(nobody로 내리기)가 두 안에서 같고, 2번의 샌드박스 효과는 확실하지 않으며, 입출력 형식이 같아 나중에 실행 파일만 바꿀 수 있음 |
 | Q48 | 해석 프로세스가 데몬의 전체 디스크 접근(FDA)을 물려받는 문제 (Q47, T23) | WO-47 보안 리뷰(2026-11-23) 지적. TCC는 uid가 아니라 코드 신원과 "책임 프로세스"로 판단한다. 해석 프로세스는 데몬과 같은 실행 파일이고 데몬의 자식이라, 사용자가 haetaed에 FDA를 주면 nobody로 내려가도 TCC 보호 파일(예: 시스템 `TCC.db`, POSIX로는 누구나 읽을 수 있음)을 읽을 수 있을 가능성이 있다(확실하지 않음 — root·FDA로 실측 필요). fd 상한 3은 경계가 아니다(뚫린 코드가 fd를 닫으면 `open`·`socket`·exec 모두 됨 — 재리뷰 실측). 그래서 Apple plist 해석기의 메모리 손상 버그(0-day)가 있으면 nobody 권한으로 파일 읽기(FDA를 물려받았다면 TCC 보호 파일까지 — 다만 POSIX 권한은 그대로라 사용자 홈의 600·700 파일은 못 읽고, 남는 것은 누구나 읽을 수 있는데 TCC가 막는 파일, 예: 시스템 `TCC.db`), 네트워크, exec, Mach 메시지, stdout 결과 조작이 된다. 이것들은 그 plist를 쓴 같은 사용자 악성코드가 이미 할 수 있는 일보다 대부분 작다. 1) 이 남은 위험을 받아들이고 D26·T23에 적음 — Claude 추천 / 2) Q47 2번(별도 실행 파일)으로 바꾸고 책임을 끊음 — 책임 끊기는 비공개 API(`responsibility_spawnattrs_setdisclaim`)라 확실하지 않음 / 3) deprecated된 `sandbox_init`으로 Mach·네트워크까지 막음 — macOS 10.8부터 "No longer supported", 동작 여부 확실하지 않음 | 2번 (2026-11-23) — 방식은 Q54 |
-| Q49 | launchd가 바꿔치기된 데몬을 띄우는 경우 (D20, 8장 `/Applications` 항목) | WO-48 보안 리뷰(2026-11-23) 지적. 해석 프로세스는 cdhash로 묶었지만(WO-48), 데몬 자신은 launchd가 번들 경로에서 root로 띄운다. `/Applications`를 쓸 수 있는 admin 악성코드가 번들을 바꾸고 데몬이 다시 뜨면(유휴 종료 뒤, D20 새 빌드) 바뀐 파일이 root로 돌 수 있다 — App Management(TCC)·BTM이 막는지는 확실하지 않음(8장에 이미 "VM에서 확인"으로 적혀 있음). 1) WO-45(Release 서명) 전에 VM에서 실측하고, 막히지 않으면 데몬 launchd plist에 `SpawnConstraint`(팀 ID + 서명 ID, macOS 14+)를 넣는다 — SMAppService plist에서 먹는지 실측 필요, Claude 추천 / 2) App Management가 막는다고 보고 문서에만 적음 | (미정 — WO-45 전에 결정) |
+| Q49 | launchd가 바꿔치기된 데몬·해석 서비스를 띄우는 경우 (D20, 8장 `/Applications` 항목 — 해석 서비스는 nobody로 떠서 덜 위험하지만 `SpawnConstraint`는 두 plist 모두에) | WO-48 보안 리뷰(2026-11-23) 지적. 해석 프로세스는 cdhash로 묶었지만(WO-48), 데몬 자신은 launchd가 번들 경로에서 root로 띄운다. `/Applications`를 쓸 수 있는 admin 악성코드가 번들을 바꾸고 데몬이 다시 뜨면(유휴 종료 뒤, D20 새 빌드) 바뀐 파일이 root로 돌 수 있다 — App Management(TCC)·BTM이 막는지는 확실하지 않음(8장에 이미 "VM에서 확인"으로 적혀 있음). 1) WO-45(Release 서명) 전에 VM에서 실측하고, 막히지 않으면 데몬 launchd plist에 `SpawnConstraint`(팀 ID + 서명 ID, macOS 14+)를 넣는다 — SMAppService plist에서 먹는지 실측 필요, Claude 추천 / 2) App Management가 막는다고 보고 문서에만 적음 | (미정 — WO-45 전에 결정) |
 | Q50 | 기준값·마지막 성공 시각을 사용자별로 둘지 (D7, D29, WO-10) | WO-10 설계 중 발견(2026-11-23). D7은 기준값을 검사마다 파일 하나(`baseline/<checkID>.json`)로 두는데, D29로 검사는 부른 사용자 범위(시스템 + 그 사용자)로만 돈다. 사용자가 둘 이상인 맥에서 A가 만든 기준값을 B의 검사가 비교하면 B의 항목이 전부 "새로 생김", A의 항목은 "사라짐"이 된다. 로그 검사의 `lastSuccess`도 공유하면 B는 A가 본 구간을 못 본다. 사용자가 한 명이면 차이 없음. 1) 사용자별로 둠 — `baseline/<uid>/<checkID>.json`, `lastSuccess`도 uid별(시스템 범위 부분은 사용자마다 따로 학습 — 저장 공간만 늘어남), Claude 추천 / 2) 지금처럼 공유(사용자 한 명 가정, 여러 명이면 오탐) | 1번 (2026-11-23) — D7·WO-10 반영 |
 | Q51 | "새로 생김" 탐지가 ack 뒤 저절로 "해결됨"이 되는 문제 (D7, D18, D24) | WO-10 설계 리뷰(2026-11-23). 악성 항목 M이 "새로 생김"으로 탐지 → 앱 ack → 기준값이 M을 포함해 확정(D24) → 다음 실행에서 M은 새 항목이 아니라 Finding이 없음 → `resolved`가 M을 돌려줘 패널이 "해결됨"으로 바꿈(M은 그대로 있음). D18의 "미해결 위험은 패널에 계속 표시"와 어긋남. 1) 알림 한 번으로 끝난다고 받아들이고 D18 문구를 고침 / 2) 검사는 중간 이상 Finding을 낸 항목을 `newBaseline`에 넣지 않음 — 그 항목이 있는 동안 계속 보고되고(이미 알렸으니 다시 알리지는 않음) 실제로 사라져야 `resolved`. 대신 30일 정리 뒤 다시 알림 | 2번 (2026-11-23) — WO-11 1번(`CheckResult.newBaseline`)과 8장 반영 |
 | Q52 | pending이 가득 찼을 때 무엇을 버릴지 (D24, WO-10) | WO-10 보안 리뷰(2026-11-23) 실측: 앱이 ack하지 못하게 막고(앱을 계속 죽임) 검사마다 내용이 바뀌는 탐지 1,000건을 만들면 6번 만에 `state.json`이 37MB가 되어 다시 읽지 못함 — 사용자별 pending 상한이 필요. 어떤 정책이든 노릴 틈이 있다(새 건을 거부하면 미리 채워 두고 진짜를 깔고, 오래된 건을 버리면 쏟아내서 밀어낸다). 1) 낮은 수준부터, 같은 수준이면 새 것부터 버리고 "기록 상한 초과" 높음 Finding을 하나 냄(쏟아내기 자체가 사용자에게 보이게) — Claude 추천 / 2) 새 건을 거부 / 3) 오래된 것부터 버림 | 1번 (2026-11-23) — WO-10·11 반영 |
@@ -1640,3 +1678,9 @@ sequenceDiagram
 - 알아낸 것: `NSString.standardizingPath`는 파일이 있는지에 따라 `/private`를 떼어 결과가 바뀐다(지문에 못 씀). macOS의 `fsync`는 드라이브 캐시를 비우지 않는다(`F_FULLFSYNC`). `/Library/Application Support`는 `root:admin 755`. 한 실행의 Finding은 시각이 같아, 버리는 순서를 정하려면 처음 본 시각을 지켜야 한다. TCC 권한은 계정이 아니라 코드 서명 정체로 판단하므로 같은 실행 파일을 다른 방법으로 띄워도 권한이 따라간다(Q54 설계 근거).
 - 바뀐 결정: D7(사용자별 기준값, Q50), WO-11(`newBaseline`에서 위험 항목 빼기·`baselineVersion`·저장 순서·상태 Finding·제어 문자), WO-12(ack 뒤 확정·Q53 요약), Q48 2번(Q47 방식을 다시 설계).
 - 남은 것: Q54 설계안과 새 WO, Q49(WO-45 전), Q45(WO-16 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).
+
+### 2026-11-23 — Claude (WO-49)
+- 한 일: Q54 1번 설계(WO-49~51)를 쓰고 사용자 확인 뒤 WO-49 — 새 타깃 `haetae-parser`(해석 서비스), `ParserService`, `HaetaeParserXPC`, launchd plist, 앱 번들 복사. 별도 에이전트 리뷰 2개와 재확인을 받고 반영.
+- 알아낸 것: launchd는 금방 끝난 작업을 다시 띄울 때 기본 10.05초, `ThrottleInterval = 0`이어도 1.05초를 기다린다. 10초 넘게 뜬 작업은 바로(0.07초) 다시 뜬다. 사용자 도메인 임시 작업(`launchctl bootstrap gui/<uid>`)으로 sudo 없이 시험할 수 있다. `plutil -lint`가 pbxproj 문법 오류를 잡는다(xcodebuild는 "not a valid property list"만 말함). `UserName nobody`로 띄우면 nobody의 디렉터리 그룹이 딸려 온다.
+- 바뀐 결정: WO-49 방식(요청마다 종료 → 서비스가 파일마다 자식을 띄움, 유휴 30초 종료), WO-50 지시 보강, WO-12에 신원 확인 모으기, WO-46·Q49에 해석 서비스 포함.
+- 남은 것: WO-50, WO-51(사용자 sudo 설치·승인, FDA 확인), Q49(WO-45 전), Q45(WO-16 전), Phase 1 사용자 확인 2개.
