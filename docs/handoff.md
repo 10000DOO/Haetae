@@ -46,5 +46,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 에이전트가 못 하는 것: sudo(사용자에게 터미널 명령을 주고 실행을 부탁), `sfltool dumpbtm`(인증 창에서 멈춤 — 실행 금지), 메뉴 막대 아이콘 클릭(패널 확인은 사용자에게 부탁, 화면이 잠겨 있으면 화면 도구가 아예 안 된다). `log show`는 `rtk proxy log show …`로 실행한다.
 
 ## 다음 할 일
-WO-51(해석 서비스 — 앱 등록 쪽 — 사용자가 새 빌드를 sudo로 설치·승인하고, haetaed에 전체 디스크 접근을 준 상태에서 해석 서비스가 시스템 `TCC.db`를 못 여는지 확인해야 한다). 해석 서비스는 새 타깃 `haetae-parser`(WO-49)이고 방식과 실측은 6장 WO-49, 주의사항은 8장 "해석 서비스" 항목에 있다. 그다음 WO-11. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
+WO-51은 코드를 커밋했고 사용자 확인만 남았다(해석 서비스 — 앱 등록 쪽 — 사용자가 새 빌드를 sudo로 설치·승인하고, haetaed에 전체 디스크 접근을 준 상태에서 해석 서비스가 시스템 `TCC.db`를 못 여는지 확인해야 한다). 해석 서비스는 새 타깃 `haetae-parser`(WO-49)이고 방식과 실측은 6장 WO-49, 주의사항은 8장 "해석 서비스" 항목에 있다. 그다음 WO-11. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
 ```

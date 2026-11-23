@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-23 · 브랜치: `main` · 다음 액션: WO-51(앱 등록 쪽, 사용자 sudo 설치·FDA 확인 필요) → WO-11. Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-23 · 브랜치: `main` · 다음 액션: WO-51의 사용자 확인(새 빌드 sudo 설치·승인 → probe 측정, 6장 WO-51 완료 판정) — 그동안 WO-11을 진행해도 됨. WO-51(앱 등록 쪽, 사용자 sudo 설치·FDA 확인 필요) → WO-11. Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -1189,12 +1189,23 @@ sequenceDiagram
 - 완료 판정: `swift build`·`xcodebuild` 경고 0. 임시 launchd 작업으로 띄운 서비스에 (요구사항을 통과하는 시험 클라이언트로) plist를 해석시키는지, 서비스가 아닌 프로세스가 같은 이름으로 답하면 거부하는지, 서비스가 죽거나 늦으면 `unavailable`인지 실측.
 
 ### WO-51: 해석 서비스 — 앱 등록 쪽 (Q54 1번, D28)
-- 상태: [ ] 대기
+- 상태: [~] 진행중 (Claude, 2026-11-23) — 구현 끝, `xcodebuild -scheme Haetae` 성공·경고 0, 앱 서명 검증 통과. 리뷰 2개(보안, 설계) 반영(해석 서비스 등록 실패가 데몬 연결을 막지 않게, 데몬 대조군 probe, 권한을 바꾼 뒤 다시 띄우기, FDA 두 방식 표). 코드는 커밋함. **사용자 sudo 설치·승인과 아래 확인 대기**
 - 의존: WO-49
-- 대상: `Haetae/ServiceRegistrar.swift`
-- 변경: 데몬과 같은 흐름으로 `SMAppService.daemon(plistName: "com.10000DOO.haetae-parser.plist")`를 등록·상태 확인한다(승인 필요, root 소유 번들에서만 — Q33). 해제는 데몬과 같은 때.
-- 완료 판정: `xcodebuild` 경고 0. 사용자가 root 사본으로 설치(8장 sudo 명령)·승인한 뒤 `launchctl print system/com.10000DOO.haetae-parser`에 등록이 보이고, 서비스와 해석 자식의 uid가 nobody인지(`ps`).
-- 7-1 추가(사용자 손이 필요): haetaed에 "전체 디스크 접근"을 준 상태에서 해석 서비스(와 그 자식)가 시스템 `TCC.db`를 열지 못하는지 — Q48 2번이 실제로 막히는지 확인하는 항목. 막히지 않으면 9장에 올린다. plist의 `UserName`이 `SMAppService` 데몬에서 먹는지도 여기서 확인한다(안 먹어도 `dropPrivileges`가 내린다).
+- 대상: `Haetae/ServiceRegistrar.swift`, `haetae-parser/main.swift`·`haetaed/main.swift`(Debug 전용 확인 로그)
+- 변경:
+  1. `ServiceRegistrar`: `SMAppService.daemon(plistName: "com.10000DOO.haetae-parser.plist")`를 데몬과 함께 등록한다(`registerDaemonIfNeeded`가 둘 중 등록 안 된 것을 등록, 하나가 승인 대기로 throw해도 나머지를 등록). `daemonStatus`는 데몬 기준이고, 해석 서비스가 승인 대기일 때만 `.requiresApproval`을 돌려준다(같은 승인 안내). 해석 서비스가 없거나 등록에 실패해도 데몬 연결은 막지 않는다 — 해석이 필요한 검사만 `unavailable` 검사 실패로 드러난다(리뷰 지적: 연결을 막으면 다른 검사까지 멈춘다). 해제 코드는 지금 데몬에도 없다(WO-46).
+  2. `haetae-parser/main.swift`(`#if DEBUG`): 서비스가 뜰 때 uid·gid·그룹 목록과 시스템 `TCC.db`(POSIX로는 누구나 읽을 수 있고 TCC만 막는 파일)를 열 수 있는지를 로그에 한 줄 남긴다(`probe: …`, public). Q48 2번이 실제로 막히는지 재는 용도다. `haetaed/main.swift`에도 같은 한 줄을 넣는다(대조군 — 데몬이 열 수 있어야 해석 서비스가 못 여는 것이 의미가 있다, 보안 리뷰).
+- 완료 판정: `xcodebuild` 경고 0. 사용자가 root 사본으로 설치(8장 sudo 명령)·승인한 뒤:
+  - `launchctl print system/com.10000DOO.haetae-parser`에 등록이 보인다.
+  - `sudo launchctl kickstart -k -p system/com.10000DOO.haetae-parser`(`-k`: 떠 있으면 죽이고 다시 띄움 — `probe:`는 뜰 때 한 번만 남는다. 전체 디스크 접근을 준 뒤에도 이 명령으로 다시 띄운다)로 띄우고 30초 안에 `ps -axo user,pid,comm`에 `nobody`로 보인다(plist `UserName`이 `SMAppService` 데몬에서 먹는지).
+  - `rtk proxy log show --last 5m --predicate 'subsystem == "com.10000DOO.haetae-parser"'`의 `probe:` 줄: uid 4294967294, 그룹 목록 기록.
+  - 전체 디스크 접근(FDA) 측정 — 권한을 바꿀 때마다 두 서비스를 다시 띄운다(`sudo launchctl kickstart -k -p system/com.10000DOO.haetaed`, `…haetae-parser`). 주기 전에 한 번(둘 다 `errno 1`이어야 함), 그리고 주는 방식 두 가지를 따로 잰다:
+    | FDA 목록에 넣는 것 | 데몬 `probe:` | 해석 서비스 `probe:` | 결론 |
+    |---|---|---|---|
+    | `/Applications/Haetae.app/Contents/MacOS/haetaed`(파일 선택 창에서 ⌘⇧G) | OPENED | errno 1 | 통과 — 이 방식을 사용자 안내로 쓴다 |
+    | `Haetae.app` | OPENED | OPENED | 앱에 주면 Q48이 깨진다 → 9장에 올리고 안내를 haetaed 경로로 고정 |
+    | 어느 쪽이든 | errno 1 | — | 그 방식으로는 데몬이 권한을 못 받음(측정 무효) |
+- 확인 뒤 정할 것: 이 확인을 Release에도 남겨 "열리면 서비스를 열지 않음"(fail-closed)으로 쓸지.
 
 ## 7. 검증 계획
 
