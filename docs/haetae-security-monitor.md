@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-21 · 브랜치: `main` · 다음 액션: WO-9(`SafeFileReader`·`UserDirectory`). Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 시작함(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-23 · 브랜치: `main` · 다음 액션: WO-10(지문·기준값·기록 저장소). WO-11 전에 WO-9 최종 리뷰의 남은 것 5가지(Q46 결정 포함 — WO-9 "최종 코드 리뷰" 줄)를 고친다. Q42(사용자 파일 파싱을 권한을 내린 별도 프로세스로)의 설계안을 만들어 사용자 확인을 받고 새 WO로 넣는다 — WO-16 전. Q45도 WO-16 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -228,7 +228,8 @@ classDiagram
             +append(기록)
         }
         class SafeFileReader {
-            +read(path, asUser) Data
+            +read(path, asUser, maxBytes) async Data
+            +metadata(path, maxBytes) async FileMetadata
         }
         class CommandRunner {
             +run(절대경로, 인자) Output
@@ -461,8 +462,8 @@ sequenceDiagram
 | D22 | 앱 업데이트 | Sparkle 2.10.1(2.7.2 미만 금지). `SUPublicEDKey`(EdDSA), HTTPS 피드, `SUVerifyUpdateBeforeExtraction=YES`, `SURequireSignedFeed=YES`. 비샌드박스 앱이라 `SUEnableInstallerLauncherService`·`SUEnableDownloaderService`는 끔. 업데이트 파일은 `.pkg`(D31). 자동 확인. **강제 업데이트(Q28·Q32)**: 새 버전이 있으면 업데이트 창을 닫거나 건너뛸 수 없고(모든 업데이트를 `criticalUpdate`로 배포, "이 버전 건너뛰기"·"나중에" 없음), 업데이트할 때까지 패널에 "업데이트 필요"(높음)를 띄우고 확인 때마다 창을 다시 띄운다. 검사는 멈추지 않는다. 설치는 `.pkg`라 사용자가 관리자 암호를 넣는다(D31). 서명 요구사항의 최소 빌드는 자기 `CFBundleVersion`이라 같은 빌드끼리만 연결된다(3-7) | 사용자 결정 (Q7, Q9). CVE-2025-10015·10016 (T21) | Homebrew cask만 / 수동 |
 | D23 | 패턴 팩 업데이트 | 검사 기준 데이터만 담은 JSON을 Ed25519로 서명해 따로 배포. 내려받기는 앱(`PatternUpdater`), 검증·저장은 데몬(`PatternStore`): 내장 공개키 서명 확인 → 더 높은 버전만 → `formatVersion` 지원 확인 → root 전용 폴더 저장. 없거나 깨지면 앱에 같이 넣은 기본 팩 사용. 하루 1번 + 앱 시작 때 확인, 통과하면 바로 적용, 패널에 버전 표시. 모델 목록·LLM 프롬프트는 범위 밖(앱 업데이트) | 사용자 결정 (Q8, Q10). 앱이 뚫려도 가짜 패턴을 못 넣음 | 데몬이 직접 내려받기 — root에 네트워크 공격면 / 서명 없는 팩 — 감시 무력화 |
 | D24 | ack 2단계 확정 | 데몬은 새 의심 건을 `FindingLedger.pending`에 두고 바로 기준값에 넣지 않음. 앱이 저장·알림을 마친 뒤 `ack(fingerprints)`를 보내면 그때 "알림 완료"로 바꾸고 기준값에 반영. ack가 없으면 다음 검사에서 다시 보냄 | 응답 직후 앱을 죽여 탐지를 "정상"으로 굳히는 공격을 막음(T2) | 응답과 동시에 기준값 갱신 |
-| D25 | 사용자 파일 읽기 | `SafeFileReader`: 그 사용자 권한으로 읽음(`pthread_setugid_np(uid, gid)`, 스레드 단위). `open(O_RDONLY\|O_NOFOLLOW_ANY\|O_NONBLOCK\|O_CLOEXEC)` → `fstat`으로 일반 파일(`S_ISREG`), 소유자 = 대상 사용자, 링크 수 1, 크기 상한 확인. 사용자 목록은 계정 DB(uid ≥ 501, 홈 소유자 확인)에서 가져오고 `/Users`를 나열하지 않음. root 전용 파일은 내용 없이 해시·크기·수정 시각만 내보냄 | 심볼릭 링크·하드링크·FIFO로 root 전용 파일을 빼내거나 데몬을 멈추게 하는 공격을 막음(T4, CVE-2026-50657 유형). API는 SDK에서 확인함 | `O_NOFOLLOW`만 — 상위 경로 심링크로 우회됨 |
-| D26 | CLI 실행과 자원 상한 | `CommandRunner`: `executableURL`은 절대 경로, 인자는 배열, 셸 안 거침, 환경은 `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LC_ALL=C`만. stdout·stderr를 비동기 스트리밍으로 읽고 바이트 상한(넘으면 "잘림" 표시). 타임아웃이면 `terminate()` 후 SIGKILL. `lsof -b`. 검사별 Finding 개수·`evidence` 길이·응답 크기 상한. 동시 검사 1개, 겹친 요청은 합침. 사용자 plist 파싱은 사용자 권한 스레드에서 크기 상한과 함께 | 셸 인젝션과 사용자 rc 로딩(CVE-2024-27822 유형), 파이프 교착, 로그 폭주로 인한 자원 고갈을 막음(T16, T17, T23) | `/bin/sh -c` — 인젝션 / `waitUntilExit`만 — 64KB 넘으면 교착 |
+| D25 | 사용자 파일 읽기 | `SafeFileReader`: 그 사용자 권한으로 읽음(`pthread_setugid_np(uid, gid)`, 스레드 단위). `open(O_RDONLY\|O_NOFOLLOW_ANY\|O_NONBLOCK\|O_CLOEXEC)` → `fstat`으로 일반 파일(`S_ISREG`), 소유자 = 대상 사용자, 링크 수 1, 크기 상한 확인. 권한은 여는 동안만 바꾸고 전용 스레드에서 한다(SDK가 이 API를 deprecated로 표시함 — 유지, Q41). root로 읽는 시스템 파일은 부모 폴더가 root 소유이고 group·other가 쓸 수 없고 사용자가 붙인 볼륨이 아닐 때만 그 폴더 fd 기준(`openat`)으로 열고, 소유자 root를 확인하며 링크 수는 보지 않음(아무 사용자나 root 파일에 하드링크를 걸 수 있다, Q43). 내용은 누구나 읽을 수 있는 파일만 돌려줌. 스레드 단위 권한은 코드 실행을 가두지 못하므로 파싱 경계로 쓰지 않음(Q42). 사용자 목록은 계정 DB(uid ≥ 501, 홈 소유자 확인)에서 가져오고 `/Users`를 나열하지 않음. root 전용 파일은 내용 없이 해시·크기·수정 시각만 내보냄 | 심볼릭 링크·하드링크·FIFO로 root 전용 파일을 빼내거나 데몬을 멈추게 하는 공격을 막음(T4, CVE-2026-50657 유형). API는 SDK에서 확인함 | `O_NOFOLLOW`만 — 상위 경로 심링크로 우회됨 |
+| D26 | CLI 실행과 자원 상한 | `CommandRunner`: `executableURL`은 절대 경로, 인자는 배열, 셸 안 거침, 환경은 `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `LC_ALL=C`만. stdout·stderr를 비동기 스트리밍으로 읽고 바이트 상한(넘으면 "잘림" 표시). 타임아웃이면 `terminate()` 후 SIGKILL. `lsof -b`. 검사별 Finding 개수·`evidence` 길이·응답 크기 상한. 동시 검사 1개, 겹친 요청은 합침. 공격자가 쓸 수 있는 파일의 구조 해석(plist·JSON·sqlite 등)은 권한을 영구히 내린 별도 프로세스에서 크기 상한과 함께(Q42 — 방식은 WO-16 전에 설계) | 셸 인젝션과 사용자 rc 로딩(CVE-2024-27822 유형), 파이프 교착, 로그 폭주로 인한 자원 고갈을 막음(T16, T17, T23) | `/bin/sh -c` — 인젝션 / `waitUntilExit`만 — 64KB 넘으면 교착 |
 | D27 | XPC API 원칙 | 메서드는 `collect`, `ack(fingerprints)`, `installPatterns(pack, signature)`, `markUserQuit` 4개로 고정. 경로·명령·predicate 같은 인자는 받지 않음. `installPatterns`는 서명 검증을 통과한 데이터만 씀. 요청 빈도 제한 | 전체 디스크 접근을 가진 root 데몬이 남의 요청을 대신 수행하지 않게 함 | 범용 API(경로·명령을 받음) — 권한 상승 통로 |
 | D28 | 자기 보호 | 메뉴 "종료"에서만 `markUserQuit()`. 그 밖의 끊김은 데몬이 "비정상 종료"로 기록하고, 앱은 LaunchAgent(`SMAppService.agent`, `KeepAlive`={`SuccessfulExit`: false})라 launchd가 다시 실행. 연결은 있는데 요청이 주기 상한(60분)×2를 넘게 없으면 데몬이 "정지 의심"으로 기록(설정값과 무관하게 판단). 다음 실행 때 검사 공백 표시. 설정 검증(주기 상·하한, 일시정지 자동 만료와 아이콘 표시), 약화 방향 설정 변경은 앱 기록에 남김(D27 메서드 4개 유지). 검사마다 알림 권한 확인, 꺼져 있으면 메뉴바 아이콘으로 경고 | 사용자 결정 (Q19). R13은 유지(exit 0은 재실행 안 함). T10, T11 | 기록만 — 강제 종료 후 다음 로그인까지 감시 공백 |
 | D29 | 다중 사용자 범위 | 데몬은 `NSXPCConnection.effectiveUserIdentifier`로 호출 사용자를 알아내고, 시스템 범위 + 호출자 본인 범위만 수집·응답. 다른 사용자의 홈·TCC·crontab·연결은 내보내지 않음 | 사용자 결정 (Q16). T1 | 관리자는 전체 / 관리자만 사용 |
@@ -514,7 +515,7 @@ sequenceDiagram
 | T1 다른 사용자 정보 노출 | 호출 사용자 범위 + 시스템 범위만 응답, root 전용 파일은 해시만 | D29, D25 |
 | T2 응답 직후 앱을 죽여 탐지를 "정상"으로 굳힘 | ack 2단계 확정 | D24 |
 | T3 지문 억제 악용 | 내용 해시가 든 지문, 데몬에 저장, "알림 완료"만 억제 | D18 |
-| T4 링크·FIFO로 root 파일 빼내기 | 사용자 권한으로 읽기, `O_NOFOLLOW_ANY`, 소유자·링크 수 확인 | D25 |
+| T4 링크·FIFO로 root 파일 빼내기 | 사용자 권한으로 열기, `O_NOFOLLOW_ANY`, 소유자·링크 수 확인. root 파일은 root 전용 폴더 안만 | D25 |
 | T5 번들 바꿔치기·구버전 악용 | `.pkg` root 소유 설치, 요구사항에 최소 버전, 데몬 되돌리기 방지·자기 검사 | D31, D20, 3-7 |
 | T6 XPC 클라이언트 검증 허점 | 연결마다 서명 요구사항, PID·경로로 판단 금지 | 3-7 |
 | T7 프롬프트 인젝션으로 위험 숨김 | 입력 정리, JSON 스키마 강제, LLM 권한 제한 | D10 |
@@ -533,7 +534,7 @@ sequenceDiagram
 | T20 위험한 entitlement | hardened runtime, 예외 entitlement 0개 | 3-7, 8장 |
 | T21 Sparkle 취약점 | 2.7.2 미만 금지, 서명 피드, XPC 서비스 끔 | D22 |
 | T22 SPM 공급망 | `Package.resolved` 고정 | D16 |
-| T23 root가 공격자 파일 파싱 | 사용자 권한 스레드, 크기 상한, 동적 서명 검사 | D26, 3-5 ④ |
+| T23 root가 공격자 파일 파싱 | 권한을 내린 별도 프로세스에서 파싱(Q42), 크기 상한, 동적 서명 검사 | D26, 3-5 ④ |
 
 ### 3-7. XPC 통신 보안 (R16)
 
@@ -578,7 +579,7 @@ sequenceDiagram
 | `DaemonClient`, `ListenerDelegate`, `CollectService` | Apple `NSXPCConnection(machServiceName:options: .privileged)`, `NSXPCListener(machServiceName:)`, `setCodeSigningRequirement(_:)` | 데몬은 서명 검사를 건 뒤에만 `resume()` |
 | `HaetaeApp`, `PanelView`, `SettingsView` | SwiftUI `MenuBarExtra`, `Settings` | - |
 | `HaetaeKit` | Swift Package Manager 로컬 패키지 (Xcode "Add Local Package…") | 앱 타깃은 `HaetaeShared`·`HaetaeAppCore`만 링크, `HaetaeChecks`는 데몬만 |
-| `SafeFileReader` | `open(2)`의 `O_NOFOLLOW_ANY`, `pthread_setugid_np` (SDK `sys/fcntl.h`, `unistd.h`) | 스레드 단위로 권한을 바꾸고 끝나면 되돌림 |
+| `SafeFileReader` | `open(2)`의 `O_NOFOLLOW_ANY`, `pthread_setugid_np` (SDK `sys/fcntl.h`, `unistd.h`) | 전용 스레드에서 여는 동안만 권한을 바꿈 |
 | `CommandRunner` | Foundation `Process` (`executableURL`, `arguments`, `environment`) | 셸을 거치지 않음, 파이프는 비동기로 비움 |
 | Sparkle 설정 | sparkle-project.org 문서 (Publishing, Customization) | D22의 키 값 그대로 |
 
@@ -762,15 +763,17 @@ sequenceDiagram
 - 재리뷰 3 확인 (2026-11-21, 같은 리뷰어 — 위 조치분): 코드 지적 0. `isOnSystemVolume`을 static 함수로 빼 fd를 검사 직후 닫는 것 타당, 10개 경로 × 100회에 fd 누수 없음, 끝에 `/`가 붙은 디렉터리는 `process.run()`의 NSError로 거부되고 데몬은 살아 있음. 문서 지적 1건(Low) 조치 — "링크면 실제 경로를 쓴다"에 "그 경로도 접두어 아래여야 한다"를 보탬(지시 2, 8장). 확인 못 한 것: `O_NONBLOCK`이 FIFO에서 멈추지 않는지(접두어 아래 FIFO는 root가 있어야 만들 수 있음, POSIX 동작 추론).
 
 ### WO-9: `SafeFileReader`와 `UserDirectory` (D25)
-- 상태: [ ] 대기
+- 상태: [x] 완료 (2026-11-23) — `swift build` 경고 0, `rg "O_NOFOLLOW_ANY" HaetaeKit` 검출. 비-root 실측(링크·상위 링크·하드링크·FIFO·크기·소유자·경로 검증, root 폴더 규칙, `metadata` 해시가 `shasum`과 일치, 1TB 희소 파일 거부, 취소, 연속 읽기에 스레드 수 회복, `user(uid:)`)과 root 실측(사용자 sudo, 9개 통과: 사용자로 열면 권한 000 파일·`sudoers`가 EACCES, root로 `sudoers` 내용은 `.rootOnly`, `master.passwd` `metadata`, 사용자 FSKit 볼륨 거부) 통과. 단위 테스트는 WO-19
 - 의존: WO-1
 - 충족: R18, R1
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/SafeFileReader.swift`, `UserDirectory.swift`
 - 변경:
-  1. `UserDirectory.users()`: `dscl . -list /Users UniqueID`(CommandRunner)에서 uid ≥ 501인 계정만 받고, 홈 경로(`dscl . -read /Users/<u> NFSHomeDirectory`)의 소유자가 그 uid인지 확인한다. `/Users`를 나열하지 않는다.
-  2. `SafeFileReader.read(path:asUser:maxBytes:) throws -> Data`: 전용 스레드에서 `pthread_setugid_np(uid, gid)` → `open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)` → `fstat`으로 `S_ISREG`, `st_uid == uid`, `st_nlink == 1`, `st_size <= maxBytes` 확인 → 읽기 → `pthread_setugid_np(KAUTH_UID_NONE, KAUTH_GID_NONE)`로 되돌림. 어느 단계든 실패하면 해당 오류를 throw한다(링크·FIFO·소유자 불일치를 구분하는 enum).
-  3. `SafeFileReader.metadata(path:)`: root 전용 파일은 내용 대신 sha256·크기·수정 시각만 돌려준다(`O_NOFOLLOW_ANY`, `S_ISREG` 확인).
-  4. `scope`: `CheckContext.users`는 호출 사용자 1명만 담는다(D29). 시스템 범위 파일은 `metadata`나 root 읽기로 처리한다.
+  1. `UserDirectory.user(uid:runner:) async throws -> UserRecord?`: 호출 사용자 1명만 조회한다(D29 — 다른 계정의 홈이 멈추거나 깨져 있어도 이 사용자 검사에 번지지 않게, 재리뷰 지적으로 `users()`에서 바꿈). `dscl . -list /Users UniqueID`(CommandRunner)에서 그 uid의 이름을 찾고, `dscl -plist . -read /Users/<u> NFSHomeDirectory PrimaryGroupID`로 홈과 gid를 읽고, 홈(`O_DIRECTORY | O_NOFOLLOW_ANY`, `SafeFileReader`와 같은 전용 스레드)의 소유자가 그 uid인지 확인한다. 조회 명령 실패는 throw, uid < 501·계정 없음·홈/그룹 없음·홈 조건 불일치는 nil. `/Users`를 나열하지 않는다. `UserRecord`는 `name`·`uid`·`gid`·`home`, `UserRecord.root`는 시스템 파일용.
+  2. `SafeFileReader.read(path:asUser:maxBytes:) async throws -> Data`: 한 번 쓰고 끝나는 전용 스레드에서 `pthread_setugid_np(uid, gid)` → `pthread_getugid_np`로 확인 → `open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)` → `fstat`으로 `S_ISREG`, `st_uid == uid`, `st_nlink == 1` 확인 → `pthread_setugid_np(KAUTH_UID_NONE, KAUTH_GID_NONE)`로 되돌림 → `st_size <= maxBytes` 확인 → 읽기(읽으면서도 상한 확인). `UserRecord.root`면 권한을 바꾸지 않고 root 전용 폴더 규칙(D25, Q43)으로 열고(사용자가 붙인 볼륨은 거부), 누구나 읽을 수 있는 파일(`S_IROTH`)만 내용을 돌려준다(아니면 `rootOnly` — `metadata`를 쓴다). 실패는 `SafeFileError`(`invalidPath`·`symlink`·`notRegularFile`·`ownerMismatch`·`hardLink`·`untrustedDirectory`·`rootOnly`·`tooLarge`·`system(errno)`). 취소되면 읽기가 커널에서 멈춰 있어도 바로 `CancellationError`(스레드는 버림. 사용자 쪽 읽기가 동시에 8개, 전체가 64개(멈춘 것 포함)를 넘으면 `EAGAIN`). 내려받지 않은 iCloud 파일은 기다리지 않고 `EDEADLK`.
+  3. `SafeFileReader.metadata(path:maxBytes:) async throws -> FileMetadata`: root 전용 파일은 내용 대신 sha256(소문자 hex)·크기·수정 시각만 돌려준다. `UserRecord.root` 읽기와 같은 조건, 크기 상한.
+  4. `scope`: `CheckContext.user`는 호출 사용자 1명이다(D29). 시스템 범위 파일은 `metadata`나 root 읽기로 처리한다.
+- 리뷰 (2026-11-23, 별도 에이전트 2개: 보안, 설계·동시성 — 3회전): Critical 0. 1회전 High 1(읽기가 커널에서 멈추면 취소·타임아웃이 안 먹음) 조치 — 전용 스레드 + 취소 시 스레드를 버리고 바로 돌아옴, 사용자 쪽 동시 8개·전체 64개 상한, dataless 파일 즉시 실패. 그 밖의 조치 — `metadata`를 async·크기 상한·root 폴더 규칙으로, 권한 전환 뒤 `pthread_getugid_np`로 확인, 권한은 여는 동안만, 홈 확인을 `O_NOFOLLOW_ANY`로, 조회 실패는 throw·속성 없음은 nil, root만 읽는 파일은 내용 대신 `.rootOnly`, 사용자 볼륨(`fstatfs`)을 root 읽기에서 거부, `users()`를 `user(uid:)`로(D29 — 다른 계정이 호출 사용자 검사를 막지 못하게), `CommandOutput.succeeded`. 설계 지적은 Q41~Q45로 올려 결정받음(Q45는 WO-16 전). WO-11 `CheckContext.user`와 `user-scope` 실패 Finding, WO-19 시험 목록, WO-16·18·28~34·39 줄, 8장 사용 규칙 반영. 최종 재리뷰 둘 다 "문제 없음". 리뷰어 실측: 일반 사용자가 root 파일에 하드링크를 걸 수 있음, `kern.num_taskthreads` 9216을 넘기면 `Thread.start()`가 조용히 실행되지 않음. 확인 못 한 것: 커널에서 실제로 멈추는 마운트, dataless 파일, `kcpassword` 형식.
+- 최종 코드 리뷰 (2026-11-23, 별도 에이전트 `paseo-handoff`): "커밋해도 됨", Critical·High 0. 같은 설정으로 따로 빌드해 경고 0, continuation 한 번 resume·`Atomic` 카운터·`unsafe` 7곳 확인. 문서만 고친 것 — 8장의 "건너뛰면 안 되는 에러"를 `ENOENT` 말고 전부로, root 읽기에 넘기면 안 되는 경로를 "사용자 데이터에서 나온 경로"로 넓힘. **WO-11 전에 할 것**(코드, 커밋 뒤 별도 수정): ① Q46 결정 반영 ② 사용자 쪽 상한 8을 uid별로 세기(다른 사용자가 멈춘 마운트로 내 읽기를 `EAGAIN`으로 만들지 못하게 — 비관리자가 멈추는 마운트를 만들 수 있는지는 확실하지 않음) ③ `metadata`의 `size`를 실제로 읽은 바이트로 ④ 이미 취소된 채 들어오면 스레드를 시작하지 않고 카운터를 되돌림 ⑤ `UserDirectory.user`의 `- Throws:`에 `SafeFileError.system(EAGAIN)` 추가.
 - 금지: `FileManager.contents(atPath:)`로 사용자 파일 읽기 금지, `/Users` 디렉터리 나열 금지
 - 완료 판정: `swift build` 성공, `rg "O_NOFOLLOW_ANY" HaetaeKit` 검출
 
@@ -795,8 +798,8 @@ sequenceDiagram
 - 대상: `HaetaeKit/Sources/HaetaeChecks/Engine/` — `SecurityCheck.swift`, `CheckContext.swift`, `CheckRunner.swift`, `CheckRegistry.swift`, `SecretMasker.swift`, `PatternStore.swift`(읽기 부분), `DefaultPatterns.swift`(기본 팩 JSON을 raw 문자열로 내장)
 - 변경:
   1. `protocol SecurityCheck: Sendable { var id: String { get }; var timeout: Duration { get }; var needsBaseline: Bool { get }; func run(_ ctx: CheckContext) async throws -> CheckResult }`, `CheckResult { findings: [Finding]; newBaseline: Data? }`
-  2. `CheckContext`: `baseline: Data?`(첫 실행이면 nil), `isFirstRun: Bool`, `patterns: JSONValue`(팩에서 자기 `checkID` 구역), `users: [UserRecord]`, `reader: SafeFileReader`, `runner: CommandRunner`, `since: Date?`(마지막 성공 시각)
-  3. `CheckRunner.runAll(callerUID:) async -> CollectResult`: `CheckRegistry.all`을 순서대로 실행한다. 검사마다 `withTimeout`을 건다. 실패·타임아웃이면 기준값을 갱신하지 않고, `checkID = "haetae.check-failure"`, `ruleLevel = .medium`인 Finding을 만들고 `failedChecks`에 넣는다. 같은 검사가 연속 3번 실패하면 `.high`로 올린다. 성공하면 `newBaseline`을 **pending 기준값**으로 저장한다(확정은 앱이 ack했을 때 — D24, WO-12 2번). `lastSuccess`는 그 실행의 Finding이 ledger pending에 저장된 **뒤에** 갱신한다. 먼저 갱신하면 검사 도중 데몬이 꺼졌을 때(앱이 죽으면 5초 뒤 `exit(0)`, 새 빌드 종료, SIGKILL) 그 구간을 다시 보지 못해 탐지를 영구히 잃는다(같은 사용자 권한의 악성코드가 앱을 죽이는 것만으로 가능). 도중에 끊기면 다음 실행이 같은 구간을 다시 본다. `runAll` 전체에 상한을 둔다(값은 이 WO에서 실측으로 정하고 `HaetaeLimits`에 넣는다 — 앱의 `collect` 타임아웃이 이 값에 맞춰진다, WO-5). 넘으면 남은 검사는 타임아웃 실패로 처리한다. `observedAt`은 `CheckRunner`가 실행 시각(`Date()`) 하나로 채운다 — 파일·로그 시각은 넣지 않는다(필요하면 evidence에). 범위(1970-01-01…9999-12-31 UTC) 밖이면 `validate()`가 응답 전체를 거부하므로, 파일 시각을 넣으면 `touch -t 1960…` 한 번으로 그 회차 감시를 막을 수 있다. 모든 Finding은 `SecretMasker`와 `HaetaeLimits`(evidence·title 길이, 검사별 개수)를 거친다. 길이는 Unicode scalar 수로 자르고 "…(잘림)" 같은 꼬리까지 포함해 상한 이하여야 한다(넘으면 앱이 응답 전체를 거부함). 검사별 개수를 넘으면 수준 높은 것부터 남긴다. `runAll` 결과는 `CollectResult.validate()`를 통과해야 한다. 마지막에 `ledger.filterNew`와 `ledger.resolved`를 적용한다. 동시 실행은 1개만 하고, 실행 중에 온 **같은 `callerUID`** 요청만 같은 결과를 기다리게 합친다. 다른 사용자는 앞 실행이 끝난 뒤 자기 범위로 실행한다(D29 — 합치면 다른 사용자의 홈·TCC 결과를 받게 된다). 로그는 `HaetaeChecks`에 `Logger(subsystem: CodeRequirements.daemonIdentifier, category: "checks"/"ledger"/"patterns")`를 두고 8장의 공개 범위 규칙을 따른다.
+  2. `CheckContext`: `baseline: Data?`(첫 실행이면 nil), `isFirstRun: Bool`, `patterns: JSONValue`(팩에서 자기 `checkID` 구역), `user: UserRecord?`(호출 사용자 1명, D29 — 조회에 실패하면 nil), `reader: SafeFileReader`, `runner: CommandRunner`, `since: Date?`(마지막 성공 시각)
+  3. `CheckRunner.runAll(callerUID:) async -> CollectResult`: 먼저 `UserDirectory.user(uid:runner:)`로 호출 사용자를 찾는다. nil이거나 throw면 Finding 1건(`checkID = "haetae.check-failure"`, subject `user-scope`)을 넣고(연속 3번이면 높음, 다른 검사 실패와 같은 규칙) `ctx.user = nil`로 검사를 돌린다 — 검사는 `ctx.user == nil`이면 사용자 부분만 건너뛰고 시스템 부분은 그대로 본다. `CheckRegistry.all`을 순서대로 실행한다. 검사마다 `withTimeout`을 건다. 실패·타임아웃이면 기준값을 갱신하지 않고, `checkID = "haetae.check-failure"`, `ruleLevel = .medium`인 Finding을 만들고 `failedChecks`에 넣는다. 같은 검사가 연속 3번 실패하면 `.high`로 올린다. 성공하면 `newBaseline`을 **pending 기준값**으로 저장한다(확정은 앱이 ack했을 때 — D24, WO-12 2번). `lastSuccess`는 그 실행의 Finding이 ledger pending에 저장된 **뒤에** 갱신한다. 먼저 갱신하면 검사 도중 데몬이 꺼졌을 때(앱이 죽으면 5초 뒤 `exit(0)`, 새 빌드 종료, SIGKILL) 그 구간을 다시 보지 못해 탐지를 영구히 잃는다(같은 사용자 권한의 악성코드가 앱을 죽이는 것만으로 가능). 도중에 끊기면 다음 실행이 같은 구간을 다시 본다. `runAll` 전체에 상한을 둔다(값은 이 WO에서 실측으로 정하고 `HaetaeLimits`에 넣는다 — 앱의 `collect` 타임아웃이 이 값에 맞춰진다, WO-5). 넘으면 남은 검사는 타임아웃 실패로 처리한다. `observedAt`은 `CheckRunner`가 실행 시각(`Date()`) 하나로 채운다 — 파일·로그 시각은 넣지 않는다(필요하면 evidence에). 범위(1970-01-01…9999-12-31 UTC) 밖이면 `validate()`가 응답 전체를 거부하므로, 파일 시각을 넣으면 `touch -t 1960…` 한 번으로 그 회차 감시를 막을 수 있다. 모든 Finding은 `SecretMasker`와 `HaetaeLimits`(evidence·title 길이, 검사별 개수)를 거친다. 길이는 Unicode scalar 수로 자르고 "…(잘림)" 같은 꼬리까지 포함해 상한 이하여야 한다(넘으면 앱이 응답 전체를 거부함). 검사별 개수를 넘으면 수준 높은 것부터 남긴다. `runAll` 결과는 `CollectResult.validate()`를 통과해야 한다. 마지막에 `ledger.filterNew`와 `ledger.resolved`를 적용한다. 동시 실행은 1개만 하고, 실행 중에 온 **같은 `callerUID`** 요청만 같은 결과를 기다리게 합친다. 다른 사용자는 앞 실행이 끝난 뒤 자기 범위로 실행한다(D29 — 합치면 다른 사용자의 홈·TCC 결과를 받게 된다). 로그는 `HaetaeChecks`에 `Logger(subsystem: CodeRequirements.daemonIdentifier, category: "checks"/"ledger"/"patterns")`를 두고 8장의 공개 범위 규칙을 따른다.
   4. 첫 실행 규칙(D7): `isFirstRun`이면 "새로 생김"류 규칙은 건너뛰되, 기준값과 무관한 규칙은 적용한다. 각 검사가 `ctx.isFirstRun`으로 분기한다.
   5. `SecretMasker.mask(_:) -> String`: 다음을 `«가림»`으로 바꾼다. `password=`/`passwd`/`pwd`/`token`/`secret`/`api[_-]?key` 뒤의 값, `Bearer …`, `-----BEGIN … PRIVATE KEY-----` 블록, 32자 이상 base64·hex 덩어리, `sudo -S` 앞뒤 echo 인자. URL은 쿼리 문자열을 가린다.
   6. `PatternStore.current`: Phase 2에서는 `DefaultPatterns`에 내장한 문자열(기본 팩)만 읽는다. SwiftPM 리소스 번들은 쓰지 않는다 — haetaed는 앱 번들 안으로 복사되는 명령줄 도구라 `Bundle.module`을 찾지 못한다(`{formatVersion: 1, version: 1, checks: {<checkID>: {...}}}`). 서명 검증과 설치는 WO-41.
@@ -812,7 +815,7 @@ sequenceDiagram
 - 변경:
   - `CommandRunner`는 데몬 전체에서 인스턴스 하나만 만들어 주입한다(직렬화가 인스턴스 단위라서, 연결마다 만들면 D26의 "동시 1개"가 깨진다 — WO-8 리뷰).
   0. 규칙 위치(Q23): 아래 1·2·3·4·6의 판단(응답 자르기, ack 개수 상한, 연결 종료 기록, 빈도 제한·결과 공유, 되돌리기 방지)과 WO-40의 `scanGap` 계산은 `public actor CollectCoordinator`(`init(runner:ledger:clock:build:highestBuild: Int?)`, `collect(callerUID:) async throws -> Data`, `ack(_:callerUID:) async throws`, `ensureNotRolledBack() throws`, `connectionClosed(callerUID:userQuit:hadValidCall:) async`)에 둔다. `Clock`과 `highestBuild` 값을 주입받아 파일 없이 테스트할 수 있게 한다. `highestBuild`가 `nil`이면 되돌리기 방지를 끈다 — `main`은 `variant == .release`일 때만 `highest-build`를 읽어 넘기고 Debug는 `nil`을 넘긴다(Q34. 패키지 안에서 `#if DEBUG`로 나누지 않는다 — `swift test`로 Release 경로를 시험할 수 없게 된다) — `highest-build` 파일의 읽기·쓰기(SecureDirectory I/O)는 `main`이 하고 값만 넘긴다. `CollectService`는 `@objc` 어댑터(오류를 NSError로 바꿔 응답 전달)만 하고, `installPatterns`·`markUserQuit` 어댑터도 먼저 `ensureNotRolledBack()`을 부른다.
-  1. `collect`: `CheckRunner.runAll(callerUID:)` → `CollectResult`(`patternVersion`, `daemonBuild`, `scanGap`(Q31)은 직전 연결이 `markUserQuit` 없이 끝났거나 "정지 의심"(WO-40)이 기록됐을 때만 채운다 — 잠자기, 메뉴 "종료" 뒤 재실행, 재부팅에는 채우지 않는다) → 개수(`maxFindingsPerReply`)와 바이트(`maxReplyBytes`) 모두 낮은 수준부터 잘라낸다. "높음"만으로도 넘치면 높음도 자른다. 잘린 건수는 `droppedFindings`에 넣고, 잘린 건은 pending으로 남겨 다음 주기에 이어서 보낸다. `resolved`도 바이트 계산에 넣고, 넘치면 다음 응답으로 미룬다 → `CollectResult.encodeValidated()`로 만든다. 어댑터는 오류를 `HaetaeXPCError.….nsError`로만 돌려준다(`DecodingError`·경로를 그대로 싣지 않음, `as NSError` 대신 `.nsError`)
+  1. `collect`: `CheckRunner.runAll(callerUID:)`(호출 사용자 조회와 그 실패 처리는 WO-11 3번) → `CollectResult`(`patternVersion`, `daemonBuild`, `scanGap`(Q31)은 직전 연결이 `markUserQuit` 없이 끝났거나 "정지 의심"(WO-40)이 기록됐을 때만 채운다 — 잠자기, 메뉴 "종료" 뒤 재실행, 재부팅에는 채우지 않는다) → 개수(`maxFindingsPerReply`)와 바이트(`maxReplyBytes`) 모두 낮은 수준부터 잘라낸다. "높음"만으로도 넘치면 높음도 자른다. 잘린 건수는 `droppedFindings`에 넣고, 잘린 건은 pending으로 남겨 다음 주기에 이어서 보낸다. `resolved`도 바이트 계산에 넣고, 넘치면 다음 응답으로 미룬다 → `CollectResult.encodeValidated()`로 만든다. 어댑터는 오류를 `HaetaeXPCError.….nsError`로만 돌려준다(`DecodingError`·경로를 그대로 싣지 않음, `as NSError` 대신 `.nsError`)
   2. `ack`: `HaetaeXPC.decodeAck`(크기·개수 `maxAckFingerprints`·지문 형식 검증) → `ledger.acknowledge` → 해당 검사의 pending 기준값 반영
   3. `markUserQuit`: `ledger.record(.userQuit)`. 연결이 `markUserQuit` 없이 끊기면 `ledger.record(.abnormalTermination(uid, 시각))`. 유효한 호출 없이 끊긴 연결은 `ledger.record(.invalidConnection)`(K 검사가 사용 — 누구나 반복할 수 있으니 건마다 쓰지 말고 집계해서 기록한다). WO-4의 `invalidAttempts` 카운터는 ledger로 대체해 지운다. 연결별 상태는 잠금 하나 안의 `{ hadValidCall, userQuit }`로 묶고, `userQuit`는 어댑터가 동기로 세운다(`await` 뒤에 세우면 앱의 2초 대기가 먼저 끝나 비정상 종료로 기록된다) — 순서: `ensureNotRolledBack()`(init 상수만 읽으므로 `nonisolated`) → `userQuit = true` → Task에서 ledger 기록 → `reply()`. `invalidationHandler`는 `await coordinator.connectionClosed(…)`가 끝난 뒤에 연결 수를 줄인다(먼저 줄이면 기록 전에 유휴 `exit(0)`가 날 수 있다, 8번)
   4. 빈도 제한: `collect`는 같은 사용자 기준으로 20초에 1번(그 사이 요청은 진행 중인 결과를 공유한다)
@@ -874,7 +877,9 @@ sequenceDiagram
 
 ### WO-16: 검사 ② 자동 실행 (`persistence.launch-items`, `persistence.other-locations`)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
-- 수집: `/Library/LaunchAgents`, `/Library/LaunchDaemons`, 호출 사용자 `~/Library/LaunchAgents`(SafeFileReader로 plist를 크기 상한 안에서 파싱), `/usr/bin/sfltool dumpbtm`(root). other-locations는 LoginHook·LogoutHook, `/private/var/at/jobs`, `/Library/StartupItems`, `/etc/rc.*`, 플러그인 폴더(Spotlight, QuickLook, Screen Savers, Audio/Plug-Ins/HAL, PreferencePanes, DirectoryServices/PlugIns), `~/.ssh/rc`, `/etc/ssh/sshrc`, Terminal 시작 명령
+- Q45: `/private/var/at/jobs`는 `daemon:wheel 755`라 지금 root 읽기 규칙(Q43)으로는 `.untrustedDirectory`다 — 이 WO 시작 전에 Q45를 정한다.
+- Q44: 폴더 나열 API는 이 WO가 D25 규칙(`O_DIRECTORY | O_NOFOLLOW_ANY`, 사용자 권한으로 열기, fd 기준 `fdopendir`·`fstatat`)대로 `SafeFileReader`에 추가한다. Q42: 사용자 plist 파싱은 별도 프로세스에서 한다 — 그 WO(설계 후 번호 부여)가 먼저 끝나야 한다.
+- 수집: `/Library/LaunchAgents`, `/Library/LaunchDaemons`, 호출 사용자 `~/Library/LaunchAgents`(SafeFileReader로 읽고, plist는 크기 상한 안에서 별도 프로세스가 파싱 — Q42), `/usr/bin/sfltool dumpbtm`(root). other-locations는 LoginHook·LogoutHook, `/private/var/at/jobs`, `/Library/StartupItems`, `/etc/rc.*`, 플러그인 폴더(Spotlight, QuickLook, Screen Savers, Audio/Plug-Ins/HAL, PreferencePanes, DirectoryServices/PlugIns), `~/.ssh/rc`, `/etc/ssh/sshrc`, Terminal 시작 명령
 - 기준값: 항목 경로 → {Label, ProgramArguments 해시, 서명 TeamID}
 - 지문: subject = 경로 + Label, contentHash = plist 내용 sha256
 - 규칙: 3-5 ② — 새 항목은 중간. `com.apple.*`인데 Apple 서명이 아니거나, 숨김 경로 스크립트를 실행하거나, `DYLD_*` 키가 있으면 높음. 사라졌다 다시 생긴 항목은 높음.
@@ -889,6 +894,7 @@ sequenceDiagram
 
 ### WO-18: 검사 A 숨은 실행 파일·수집 흔적·이름 위장 (`artifacts.hidden-executables`, `artifacts.staging`, `artifacts.apple-impersonation`)
 - 상태: [ ] 대기 · 의존: WO-11, WO-16 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(깊이 제한 폴더 나열, 실행 비트·`getxattr`, 실행 파일 sha256)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다).
 - 수집: 호출 사용자 홈의 dot 파일(깊이 1), `/Users/Shared`, `~/Library/Application Support`·`Caches`(깊이 2)에서 Mach-O 매직 또는 `#!`로 시작하고 실행 비트가 있는 파일. 서명은 `SecStaticCodeCreateWithPath`, 쿼런틴은 `getxattr`. `/tmp`, `/private/var/tmp`, 사용자 `$TMPDIR`의 Mach-O·zip(`/usr/bin/zipinfo -1`로 이름만). apple-impersonation은 WO-16 결과와 프로세스 목록을 재사용(프로세스는 WO-26 이후).
 - 기준값: 파일 경로 → {sha256, TeamID/ad-hoc}
 - 지문: subject = 경로, contentHash = 파일 sha256
@@ -902,7 +908,7 @@ sequenceDiagram
 - 대상: `HaetaeKit/Tests/HaetaeChecksTests/`, `HaetaeKit/Tests/HaetaeAppCoreTests/`
 - 변경:
   1. `CommandRunner`: 상대 경로·허용 경로 밖(`/usr/local/bin/x`, `/opt/homebrew/bin/x`)·`..` 성분 거부, 시스템 볼륨 밖 거부(`/usr/libexec/cups/backend/usb`와 `/usr/libexec/CUPS/backend/usb`, `/usr/bin/safaridriver`, 없는 파일 → `executableNotAllowed`), 인자의 NUL 거부, 타임아웃 시 SIGTERM으로 정리(`/bin/sleep 30` → `timedOut`, `terminatedBySignal`, `exitCode == 15`), SIGTERM을 무시하는 명령은 SIGKILL로 정리(`/usr/bin/perl -e '$SIG{TERM}="IGNORE"; sleep 30'` → 약 timeout + 2초, `exitCode == 9` — `/bin/sleep`은 SIGTERM에 바로 죽어서 이 경로를 못 탄다), `maxBytes` 자르기(`/usr/bin/yes`), 환경 변수가 고정값인지(`/usr/bin/env`), 종료 코드와 시그널 구분(`/bin/sh -c "exit 9"`는 `terminatedBySignal == false`), 손자 프로세스 정리(`/bin/sh -c "/bin/sleep 34 & echo hi"` → 손자가 stdout을 쥐고 있어 drain 기한인 약 2초 뒤 돌아오고 `truncated == true`, stdout은 `"hi\n"` 그대로, `sleep 34`가 남지 않음 — 실측 2026-11-20. 타임아웃·취소 때도 남지 않음), 실행 중 취소 → `CancellationError`, 동시 호출 3개가 차례로 실행됨. 시험에만 `/bin/sh -c`를 쓴다(구현에서는 금지)
-  2. `SafeFileReader`(root 없이 되는 범위): 심볼릭 링크, 상위 경로 심볼릭 링크, 하드링크(`st_nlink` 2), FIFO, 크기 초과를 각각 거부하는지. 소유자 불일치는 테스트용 uid를 주입해 확인.
+  2. `SafeFileReader`(root 없이 되는 범위, 임시 폴더는 `/private/var/folders/…`로): 심볼릭 링크, 상위 경로 심볼릭 링크, 하드링크(`st_nlink` 2), FIFO, 크기 초과, 상대 경로·NUL을 각각 거부하는지. 소유자 불일치는 다른 uid의 `UserRecord`로 확인. `UserRecord.root` 읽기: `/private/etc/hosts`는 하드링크를 걸어도 성공, `/private/var/folders/…`(사용자 폴더)의 파일은 `.untrustedDirectory`, `/etc/hosts`는 `.symlink`, `metadata`의 sha256이 `shasum -a 256`과 같고 크기 상한(희소 파일 `mkfile -n`)에서 `.tooLarge`. 이미 취소된 Task는 `CancellationError`. 연속 50회 읽기에 `EAGAIN`이 없는지(스레드 수가 줄어드는지). `UserDirectory.user(uid: getuid())`가 홈·gid를 돌려주고, uid 0·없는 uid는 nil. `rootOnly`와 권한 전환은 root가 필요해 7-1에서 확인.
   3. `Fingerprint` 안정성(같은 입력 → 같은 값, 내용이 바뀌면 다른 값)
   4. `FindingLedger`: `filterNew` → ack 전 재전송 → `acknowledge` 후 제외 → `resolved` → `purge(30일)`
   5. `CheckRunner`: 타임아웃 검사가 다른 검사를 막지 않는지, 실패하면 기준값이 그대로인지, 연속 3번 실패하면 높음으로 오르는지, 첫 실행 규칙, 개수·길이 상한, `runAll` 결과가 `validate()`를 통과하는지
@@ -990,28 +996,33 @@ sequenceDiagram
 
 ### WO-28: 검사 ⑥ 권한 TCC (`privacy.tcc`)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
+- Q42: 사용자 `TCC.db`(sqlite)·plist 해석은 Q42의 별도 프로세스에서 한다.
 - 수집: `/Library/Application Support/com.apple.TCC/TCC.db`(root+FDA), 호출 사용자 `~/Library/Application Support/com.apple.TCC/TCC.db`, `MDMOverrides.plist`, `~/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist`. sqlite는 `/usr/bin/sqlite3 -readonly -json`(절대 경로)을 쓰고, `PRAGMA table_info`로 열 이름을 확인한 뒤 조회한다. FDA가 없으면 "전체 디스크 접근 필요" Finding을 높음으로 낸다.
 - 지문: subject = service + client, contentHash = auth_value + 대상 cdhash
 - 규칙: 3-5 ⑥
 
 ### WO-29: 검사 ⑧ 설치·확장·앱 무결성 (`install.apps`, `install.extensions-profiles`, `install.app-integrity`)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(`/Applications`·`~/Applications` 폴더 나열)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다). `InstallHistory.plist` 해석은 Q42 기준을 따른다.
 - 수집: `/Applications`·`~/Applications` 목록, `/usr/bin/systemextensionsctl list`, `/usr/bin/profiles list`·`status -type enrollment`, `/usr/sbin/pkgutil --pkgs`, `/Library/Receipts/InstallHistory.plist`, 앱별 TeamID·cdhash 기준값. 수정 시각이 바뀐 앱만 `SecStaticCodeCheckValidity(strict, nested)`.
 - 지문: subject = 앱 경로/패키지 id, contentHash = TeamID + cdhash
 - 규칙: 3-5 ⑧ — 지갑 앱 번들 ID 목록은 패턴 팩에 둔다
 
 ### WO-30: 검사 D 계정·인증 (`auth.accounts`, `auth.plugins-pam`)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(`SecurityAgentPlugins`·`/private/etc/pam.d` 폴더 나열)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다). loginwindow plist 해석은 Q42 기준을 따른다.
 - 수집: `/usr/bin/dscl . -list /Users UniqueID`, `IsHidden`, `/Groups/admin GroupMembership`, loginwindow plist(HiddenUsersList, autoLoginUser), `/etc/kcpassword` 존재, `/usr/sbin/sysadminctl -guestAccount status`, `/Library/Security/SecurityAgentPlugins`, `/usr/bin/security authorizationdb read system.login.console`, `/etc/pam.d/*` 해시(⑦과 중복되면 여기서만)
 - 규칙: 3-5 D
 
 ### WO-31: 검사 E 네트워크 설정·신뢰 (`network.trust`, `network.dns-proxy`)
 - 상태: [ ] 대기 · 의존: WO-11, WO-26 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(`/private/etc/resolver`·`pf.anchors` 폴더 나열)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다).
 - 수집: `/usr/bin/security find-certificate -a -Z /Library/Keychains/System.keychain`, `security dump-trust-settings -d`, 사용자 신뢰 설정(`SessionRunner`), `/usr/sbin/scutil --dns`, `--proxy`, `/usr/sbin/networksetup -getautoproxyurl <서비스>`, `/etc/resolver/*`, `scutil --nc list`, `/etc/pf.conf`·`/etc/pf.anchors`
 - 규칙: 3-5 E
 
 ### WO-32: 검사 G 브라우저·개발 도구 확장 (`ext.browser`, `ext.browser-policy`, `ext.devtools`, `ext.dock`)
 - 상태: [ ] 대기 · 의존: WO-11, WO-26 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(`Extensions/`·`.git/hooks` 등 폴더 나열)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다). Q42: Chrome `Preferences`·Firefox `extensions.json`(JSON)과 plist 해석은 Q42의 별도 프로세스에서 한다.
 - 수집: Chrome 계열 프로필의 `Extensions/`·`Preferences`·`Secure Preferences`(SafeFileReader, 크기 상한), Firefox `extensions.json`, Safari는 `SessionRunner`로 `/usr/bin/pluginkit -mAvvv`, `/Library/Managed Preferences/*.plist`, `~/.vscode/extensions`·`~/.cursor/extensions`, 홈 아래 저장소(깊이 4까지)의 `.git/hooks/*`(sample 제외), `git config --global core.hooksPath`, 최근 7일 안에 바뀐 `.pbxproj`의 `shellScript`, Dock `persistent-apps`
 - 규칙: 3-5 G
 
@@ -1022,6 +1033,7 @@ sequenceDiagram
 
 ### WO-34: 검사 H 다운로드·Gatekeeper 우회와 K 위생·자기 보호 (`download.quarantine`, `download.shell-history`, `hygiene.basics`, `haetae.self`)
 - 상태: [ ] 대기 · 의존: WO-11, WO-12 · 충족: R1, R16, R19
+- Q44: 필요한 `SafeFileReader` API(`getxattr`, 폴더 나열(`~/.zsh_sessions/*`). sqlite·셸 기록 해석은 Q42의 별도 프로세스에서)는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다).
 - 수집: H는 `~/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2`(sqlite 읽기 전용, `LSQuarantineEvent`), 앱·Mach-O 쿼런틴(`getxattr com.apple.quarantine`)과 `/usr/sbin/spctl -a -vv`, 셸 기록 새 줄(`~/.zsh_history`, `~/.zsh_sessions/*`, `~/.bash_history`, 마지막 읽은 위치를 기준값에 저장; 일치한 줄만 `SecretMasker`를 거쳐 evidence로). K는 `sysadminctl -screenLock status`(SessionRunner), `/usr/sbin/DevToolsSecurity -status`, 데몬 자기 무결성 결과(WO-12), 등록 상태(`sfltool dumpbtm`에서 Haetae 항목), 검증 실패 연결 수(`ledger`, 24시간에 3회 이상이면 높음)
 - 규칙: 3-5 H, K
 
@@ -1049,6 +1061,7 @@ sequenceDiagram
 
 ### WO-39: 검사 I 권한 상승 흔적 (`privesc.suid`, `privesc.path-hijack`)
 - 상태: [ ] 대기 · 의존: WO-11 · 충족: R1
+- Q44: 필요한 `SafeFileReader` API(폴더 나열(`/etc/paths.d/*` → `/private/etc/paths.d`))는 이 WO가 D25 규칙대로 추가한다(앞 WO가 이미 만들었으면 그것을 쓴다).
 - 수집: `/usr/bin/find /usr/local /opt /Users /Applications /Library -xdev ( -perm -4000 -o -perm -2000 ) -type f`(하루 1번, 마지막 실행 시각을 기준값에 저장, 타임아웃 120초), `/etc/paths`, `/etc/paths.d/*`, 셸 설정의 PATH
 - 규칙: 3-5 I
 
@@ -1251,7 +1264,9 @@ sequenceDiagram
 - 데몬의 `Bundle.main`(확인됨, WO-3 리뷰에서 실측): `bundleURL`은 `Haetae.app`, `executableURL`과 `infoDictionary`는 데몬 자신의 것(내장 `__info_plist`)이다. 그래서 `Bundle.main.infoDictionary`로 자기 값을 읽는 것은 맞고, `bundleURL/Contents/Info.plist`를 읽으면 앱의 값이 나온다.
 - `.gitignore`에 서명 키·인증 파일(`*.p8`, `*.p12`, `*.pem`, `*.key`, `.env` 등)과 릴리스 산출물(`*.pkg`, `*.xcarchive` 등) 패턴이 있다(WO-1 리뷰). 그래도 키는 저장소 밖에 둔다.
 - `HaetaeKit`은 외부 의존이 없어 `Package.resolved`가 아직 생기지 않는다. 외부 패키지(MLX, Sparkle)를 앱 타깃에 넣으면 `Haetae.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`가 생기니 그때 커밋한다. `.build/`·`.swiftpm/`·`.codegraph/`(이 맥 전용 인덱스)는 `.gitignore`로 제외(WO-1).
-- `CommandRunner`(WO-8)를 쓸 때: 실행 파일은 `/usr/bin/`·`/bin/`·`/usr/sbin/`·`/sbin/`·`/usr/libexec/` 아래이면서 링크 없이 닿는 시스템 볼륨의 파일만 된다(`/usr/libexec/cups/` 아래와 링크로 된 도구는 거부). 링크면 가리키는 실제 경로를 쓰는데, 그 경로도 위 접두어 아래여야 한다 — `/System/Library/`로 가는 링크(`/sbin/mount_msdos` 등)는 그 WO에서 경로를 좁혀 추가하고, cryptex로 가는 도구(`safaridriver` 등)는 쓸 수 없다. 디스크에서 읽은 값을 인자로 넘길 때는 `--` 뒤에 둔다. 성공 판정은 `!timedOut && !terminatedBySignal && exitCode == 0`. `truncated`면 출력이 불완전할 수 있다. 한 번 호출은 최대 `timeout` + 6초 — 검사의 `timeout`은 그 안에서 부르는 명령들의 합보다 길게 잡는다. `Process`에 NUL이 든 인자를 넘기면 ObjC 예외로 프로세스가 죽는다(러너가 막음 — `Process`를 직접 쓰지 않는다). `launchctl asuser`는 uid를 바꾸지 않는다(Q40).
+- `CommandRunner`(WO-8)를 쓸 때: 실행 파일은 `/usr/bin/`·`/bin/`·`/usr/sbin/`·`/sbin/`·`/usr/libexec/` 아래이면서 링크 없이 닿는 시스템 볼륨의 파일만 된다(`/usr/libexec/cups/` 아래와 링크로 된 도구는 거부). 링크면 가리키는 실제 경로를 쓰는데, 그 경로도 위 접두어 아래여야 한다 — `/System/Library/`로 가는 링크(`/sbin/mount_msdos` 등)는 그 WO에서 경로를 좁혀 추가하고, cryptex로 가는 도구(`safaridriver` 등)는 쓸 수 없다. 디스크에서 읽은 값을 인자로 넘길 때는 `--` 뒤에 둔다. 성공 판정은 `CommandOutput.succeeded`(`!timedOut && !terminatedBySignal && exitCode == 0`). `truncated`면 출력이 불완전할 수 있다. 한 번 호출은 최대 `timeout` + 6초 — 검사의 `timeout`은 그 안에서 부르는 명령들의 합보다 길게 잡는다. `Process`에 NUL이 든 인자를 넘기면 ObjC 예외로 프로세스가 죽는다(러너가 막음 — `Process`를 직접 쓰지 않는다). `launchctl asuser`는 uid를 바꾸지 않는다(Q40).
+- `SafeFileReader`(WO-9)를 쓸 때: 경로 어디에든 심볼릭 링크가 있으면 `.symlink`다 — `/etc`·`/var`·`/tmp`는 링크라서 `/private/etc/…`처럼 적는다(테스트 임시 폴더 `/var/folders/…`도 `/private`를 붙인다). `read`·`metadata`는 `async`이고 전용 스레드에서 돈다. 읽기가 커널에서 멈춰도 취소되면 바로 돌아오므로 검사 타임아웃(WO-11)은 반드시 Task 취소로 건다. 사용자 쪽 읽기가 동시에 8개(멈춘 것 포함)를 넘으면 `.system(EAGAIN)` — 검사 안에서 병렬로 읽지 않는다. root 읽기는 이 상한에 세지 않고, 전체 64개 상한에만 센다. 검사는 `ctx.user`와 `UserRecord.root`만 넘긴다 — `UserRecord`를 직접 만들지 않는다(D29, 다른 계정의 파일 내용이 호출 사용자에게 갈 수 있다. 테스트만 예외). `UserRecord.root` 읽기·`metadata`에는 사용자 데이터에서 나온 경로(`/Volumes`, 사용자 plist의 실행 파일 경로 등 — 사용자는 자기 소유 폴더 어디에나 마운트할 수 있다)를 넘기지 않는다(사용자 볼륨은 열고 나서야 거르므로 그 전에 멈출 수 있고, root 읽기는 사용자 상한 8에 세지 않는다). `onDedicatedThread`는 `SafeFileReader`·`UserDirectory` 전용 — 검사에서 직접 부르지 않는다. `kcpassword`처럼 짧고 형식이 정해진 비밀 파일에는 `metadata`를 쓰지 않는다 — 해시가 모든 사용자에게 가서 사전 대입으로 내용을 맞출 수 있다. 존재·크기·시각만 본다. 내려받지 않은 iCloud 파일은 `.system(EDEADLK)`. 시스템 파일은 `UserRecord.root`로 읽고, root 소유이며 group·other가 쓸 수 없는 폴더(사용자가 붙인 볼륨 제외) 안의 root 소유 파일만 된다(`.untrustedDirectory`, Q43). 내용은 누구나 읽을 수 있는 파일만 돌려준다 — root만 읽는 파일(`sudoers`·`master.passwd`)은 `.rootOnly`이니 `metadata`를 쓴다. root 홈(`/private/var/root`, 750)처럼 닫힌 폴더 안의 644 파일은 이 규칙에 걸리지 않으니 `metadata`로만 본다. `/private/var/at/jobs`는 `daemon` 소유라 `.untrustedDirectory`다(Q45). 사용자 FSKit 볼륨(`noowners`)의 파일은 root에게 uid 501로 보였다(2026-11-23 root 실측) — 어느 쪽이든 부모 폴더·볼륨 검사에서 거부된다. 데몬이 root가 아니면(테스트) 권한을 바꾸지 않는다 — 소유자 불일치는 다른 uid의 `UserRecord`로 확인한다. `.system(ENOENT)`(파일 없음) 말고는 모두(`.symlink`·`.hardLink`·`.ownerMismatch`·`.tooLarge`·`.notRegularFile`·`.system(EACCES)` 포함) 건너뛰지 말고 Finding이나 검사 실패로 남긴다(악성코드가 `~/.zshrc`를 링크로 바꾸거나 뒤를 큰 주석으로 채워 내용 검사를 피할 수 있다, T12). 권한은 여는 동안만 바꾼다. 그 사이에는 `open`·`fstat`·`close`만 부른다(XPC·Security·TCC는 그 스레드에서도 프로세스 신원(root)으로 돈다). 읽은 내용의 구조 해석은 root 데몬에서 하지 않는다(Q42 — 별도 프로세스).
+- `UserDirectory.user(uid:runner:)`(WO-9): 호출 사용자 1명만 조회한다. 조회 명령이 실패하면 throw, 대상이 아니면(uid < 501, 홈이 링크이거나 소유자가 다름 등) nil — WO-11 3번에서 둘 다 "발견 없음"이 아니라 검사 실패(`user-scope`)로 올린다.
 - Xcode가 패키지 library product마다 스킴(`HaetaeShared`·`HaetaeChecks`·`HaetaeAppCore`)을 자동으로 보여준다. 빌드·검증은 `Haetae`·`haetaed` 스킴으로만 한다.
 - 커밋은 Phase 완료 판정(7-1 + 7-2)을 통과한 뒤에 한다. 예외: 2026-11-19 사용자 지시로 WO-1 뒤 중간 커밋 3개와 push. 커밋 작성자 이메일은 저장소 로컬 설정(개인 이메일)이다 — 전역 설정은 회사 메일이라 public 저장소에 노출되지 않게 바꿨다. `DerivedData/`, `xcuserdata/`는 `.gitignore`로 제외돼 있고, `Package.resolved`는 커밋한다(D16).
 
@@ -1301,6 +1316,12 @@ sequenceDiagram
 | Q38 | 패널 "종료" 말고 다른 종료 경로 (D28) | D28은 "메뉴 '종료'에서만 `markUserQuit()`". 지금은 Cmd+Q(설정 창), 로그아웃·재시동, 다른 프로세스가 보낸 quit(AppleScript 등)이 모두 정상 종료 코드로 끝나서 ① launchd가 다시 띄우지 않고 ② 데몬은 비정상 종료로 기록한다. 그래서 로그아웃할 때마다 "검사하지 못했어요"가 뜰 수 있고, 다른 프로세스가 quit을 보내 재실행 보호를 끌 수 있다. 1) Cmd+Q는 패널 "종료"와 같게, 로그아웃·재시동은 정상 종료로 기록, 그 밖의 외부 quit은 다시 뜨게(`exit(75)`) — Claude 추천(로그아웃인지 가리는 방법은 구현 때 실측) / 2) 그대로 두고 오탐을 감수 |1번 (2026-11-20): Cmd+Q는 "종료"와 같게, 로그아웃·재시동은 정상 종료로, 그 밖의 외부 quit은 다시 뜨게. `AppDelegate` 반영, 실측은 7-1 P1 |
 | Q39 | Swift 설정 보강 (재리뷰의 최신 Swift 점검 제안) | 1) 패키지(`Package.swift`)에 Xcode 타깃과 같은 기능 켜기(`NonisolatedNonsendingByDefault`·`InferIsolatedConformances`·`MemberImportVisibility`) — 안 맞추면 같은 비동기 함수가 패키지에서는 백그라운드, 앱에서는 호출한 쪽에서 돈다. WO-13 전에 하는 것이 좋다, Claude 추천 / 2) `ExistentialAny` 켜기(`any` 표기 강제, 고칠 곳 1개) — Claude 추천 / 3) strict memory safety 켜기(안전하지 않은 포인터 사용을 표시하게 함, 고칠 곳 약 10개) — Q27에서 WO-8 때 해 보기로 한 것을 앱까지 넓힘, Claude 추천 / 4) 안 함 |1·2·3 전부 (2026-11-20, "swift 고치는 거 전부 다 고쳐"): `Package.swift` 모든 타깃과 두 Xcode 타깃에 반영, `unsafe` 표시 12곳 추가, 빌드 warning 0 |
 | Q40 | `launchctl asuser`가 권한을 낮추지 않음 (D32, T23, Q12) | Q12·D32는 "데몬이 그 사용자 권한으로 실행"한다고 봤지만, WO-8 보안 리뷰 실측(2026-11-20)으로 `launchctl asuser <uid>`는 세션만 바꾸고 uid는 root 그대로다(man 페이지: "does not modify the process' credentials"). 그래서 `SessionRunner`로 돌리는 명령은 사용자 세션 안에서 root로 돈다 — 사용자 파일을 읽는 도구를 root로 돌리면 T23(공격자 파일을 root가 파싱)에 걸린다. WO-26(Phase 4) 시작 전에 정한다. 1) 권한도 낮춰서 실행(`launchctl asuser <uid> /usr/bin/sudo -u <user> …` 또는 자식에서 `setuid`) — 실측 필요, Claude 추천 / 2) root로 두되 사용자 파일을 읽지 않는 명령만 허용(목록 고정) / 3) 해당 항목은 앱이 수집("앱 수집(조작 가능)" 표시) | (미정 — WO-26 전에 결정) |
+| Q41 | `pthread_setugid_np`가 deprecated (D25, WO-9) | SDK(macOS 27.0) `unistd.h`가 `__deprecated_msg("Use of per-thread security contexts is error-prone and discouraged.")`를 붙여 둠 — 빌드 경고 2개. 지금은 동작함(비-root 실측, root는 sudo 필요). 빠지면 사용자 파일 검사가 전부 실패로 드러남(조용히 root로 읽지는 않음 — 전환 뒤 `pthread_getugid_np`로 실제 값을 확인함). D25의 실제 방어는 대부분 `O_NOFOLLOW_ANY` + `fstat` 검사이고, 권한 전환은 한 겹 더 얹은 것(사용자가 못 들어가는 폴더를 지나는 경로를 커널이 막아 줌). 1) 유지 + 그 함수에서만 경고 끄기(`@diagnose(DeprecatedDeclaration, as: ignored)`, Swift 6.4에서 리뷰어가 확인) — Claude 추천 / 2) 권한 전환을 빼고 root로 연 뒤 같은 검사만 함 | 1번 (2026-11-23) — WO-9 반영(권한은 여는 동안만 바꿈, `openUserFile`에만 `@diagnose`) |
+| Q42 | "사용자 plist는 사용자 권한 스레드에서 파싱"이 막는 효과가 없음 (D26, T23) | 두 리뷰가 같이 지적(2026-11-23). 스레드 단위 권한은 코드 실행을 가두지 못함 — 파서가 뚫리면 같은 프로세스라 그 스레드가 스스로 root로 되돌리거나(xnu `settid`는 프로세스 권한을 봄, 리뷰어 기억이고 실측 아님) root 스레드의 메모리를 건드릴 수 있음. 또 `SafeFileReader.read`는 `Data`만 돌려줘 파싱은 root 문맥에서 함. 1) D26·T23 문구를 "크기 상한 + Apple 파서(`PropertyListDecoder`)"로 바꾸고, 진짜 경계는 권한을 영구히 내린 별도 프로세스라는 한계를 D25에 적음 — Claude 추천 / 2) 파싱을 권한을 내린 별도 프로세스(샌드박스 XPC 서비스 등)로 떼어 냄 — WO가 늘어남 | 2번 (2026-11-23) — D26·T23 반영. 방식(프로세스 형태, 권한 내리는 법, 대상 형식)은 WO-16 전에 설계해 사용자 확인을 받고 새 WO로 넣음 |
+| Q43 | root로 읽을 때 "링크 수 1" 규칙이 역효과 (D25) | 실측(2026-11-23): 일반 사용자가 `ln /private/etc/hosts /tmp/x`로 root 파일의 링크 수를 2로 만들 수 있음. 그러면 `read(path: "/private/etc/sudoers", asUser: <uid 0>)`가 늘 `.hardLink`로 실패 — 아무 로컬 사용자나 그 검사를 영구히 실패시키고, 3회 연속이면 "높음" 오탐 알림. 반대로 `metadata`는 소유자·링크 수를 보지 않아, 사용자가 쓸 수 있는 폴더(`/tmp`)에 쓰면 거기 걸린 root 파일 하드링크의 해시가 나감(크기 상한은 넣었음). 1) root로 여는 파일(uid 0 `read`, `metadata`)은 부모 폴더가 root 소유이고 group·other가 쓸 수 없을 때만 열고(`openat`으로 그 폴더 fd 기준), 링크 수는 보지 않고 소유자 root를 확인 — 남이 링크를 심을 수 없음, Claude 추천 / 2) 그대로(링크 수 1) — 실패는 Finding으로 드러남 | 1번 (2026-11-23) — D25·T4·WO-9 반영(`openRootFile`, `.untrustedDirectory`) |
+| Q44 | 폴더 나열·xattr·stat API가 없음 (D25, WO-11 금지 조항) | WO-11은 검사가 `FileManager`를 직접 못 쓰게 막는데, WO-16(`~/Library/LaunchAgents` 나열), WO-18(홈 나열, 실행 비트, `getxattr`, 실행 파일 sha256), WO-34(`~/.zsh_sessions/*`, `getxattr`), WO-39(`/etc/paths.d/*`)에 필요한 API를 맡은 WO가 없음. 그대로 가면 검사가 금지를 어기거나 root로 링크를 따라감(T4). 1) 그 API가 처음 필요한 WO가 D25 규칙(`O_NOFOLLOW_ANY`, 사용자 권한, fd 기준 `fstat`)대로 `SafeFileReader`에 추가 — 각 WO 본문에 한 줄씩 적음, Claude 추천 / 2) WO-9에서 지금 다 만듦 / 3) WO-16 앞에 새 WO 하나 | 1번 (2026-11-23) — WO-16·18·34·39 본문에 한 줄씩 반영 |
+| Q45 | root 읽기 폴더 규칙(Q43)에 시스템 계정 소유 폴더를 넣을지 (WO-16) | 설계·동시성 재리뷰(2026-11-23) 실측: `/private/var/at/jobs`가 `daemon:wheel drwxr-xr-x`라 지금 규칙(폴더 소유자 root)으로는 WO-16 other-locations가 늘 `.untrustedDirectory`. 다른 계획된 폴더는 모두 `root:wheel 755`로 통과. 1) 이 폴더만 예외로 두지 않고, WO-16에서 at 작업은 `/usr/bin/atq`(CommandRunner, root) 출력으로 본다 — 규칙을 넓히지 않음, Claude 추천(확실하지 않음: `atq`가 모든 사용자의 작업을 보여 주는지 WO-16에서 확인) / 2) 폴더 소유자로 `daemon`(uid 1)도 허용 / 3) uid < 500 시스템 계정 소유 폴더 모두 허용 | (미정 — WO-16 전에 결정) |
+| Q46 | 사용자 파일의 "링크 수 1" 규칙도 역효과 (D25, Q43과 같은 패턴) | 최종 코드 리뷰(2026-11-23) 지적. 홈 폴더가 `staff` 그룹에 열려 있어(`drwxr-x---`, 일반 사용자는 모두 `staff`) 비관리자 사용자 B가 `ln /Users/A/.zshrc /tmp/x`로 A 파일의 링크 수를 2로 만들 수 있음 → A의 `~/.zshrc` 읽기가 매번 `.hardLink`, 3회면 "높음" 오탐. `/tmp`는 sticky라 A가 그 링크를 못 지움(다른 계정으로 직접 재현은 안 함, 같은 계정의 `/tmp` 하드링크는 확인). 남의 파일·root 파일에 건 링크는 소유자 검사와 사용자 권한 전환이 이미 막고, 내 파일에 건 링크는 읽어도 해가 없음. 1) 사용자 파일도 링크 수를 보지 않음(`hardLink` case 삭제, D25·T4·8장·WO-19 갱신) — Claude 추천 / 2) 그대로(오탐 감수) | (미정 — WO-11 전에 결정) |
 
 ## 10. 작업 로그 (append-only)
 
@@ -1543,3 +1564,9 @@ sequenceDiagram
 - 알아낸 것: `/usr/libexec/cups`는 firmlink로 Data 볼륨이라 SIP 보호 밖이다(root만 쓸 수 있음). 이름 비교는 대소문자·유니코드 변형으로 우회되고, `statfs`는 링크를 따라가므로 `O_NOFOLLOW_ANY`로 연 fd에 `fstatfs`(`MNT_ROOTFS`)로 확인한다. XNU는 쓰이고 있는 pid·그룹·세션 번호를 새 pid로 주지 않는다(소스와 실측). 이 맥의 접두어 아래 링크 중 약 절반은 `/System/Library/`를 가리킨다.
 - 바뀐 결정: WO-8 지시 2(시스템 볼륨 확인, 링크 거부)·4(항상 `killpg`부터), 8장 `CommandRunner` 항목, WO-19 1번에 볼륨 거부 시험 추가.
 - 남은 것: Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행). 이번 세션 점검에서 찾은 것 2개(사용자 지시로 같은 날 고침 — 7-1 개인정보 명령을 둘로 나누고 정정 기록, WO-19 1번 문구를 실측대로) — ① 7-1 공통 "개인정보" `rg` 명령은 실제로는 0곳이 아니다: 계정 이름 패턴이 번들 ID 접두어에 대소문자 무시로 걸린다(실명·호스트 이름·컴퓨터 이름·시리얼은 0곳). 기록된 "0곳(exit 1)"은 rtk가 감싼 `rg`의 실행 실패(exit 1)를 "결과 없음"으로 읽었을 가능성이 크다(확실하지 않음). ② WO-19 1번의 "바로 돌아오고" — `/bin/sh -c "/bin/sleep 34 & echo hi"`는 실측상 약 2초 뒤 돌아오고 `truncated == true`다(출력 `"hi\n"`은 온전).
+
+### 2026-11-23 — Claude (WO-9)
+- 한 일: WO-9 — `SafeFileReader`(`HaetaeChecks/Engine/SafeFileReader.swift`)와 `UserDirectory`(`UserDirectory.swift`) 구현, `CommandOutput.succeeded` 추가. 별도 에이전트 리뷰 2개(보안, 설계·동시성)를 3회전 받고 반영. 사용자 sudo로 root 경로 실측(9개 통과). Q41~Q44 결정 반영, Q45 추가.
+- 알아낸 것: SDK(macOS 27.0)가 `pthread_setugid_np`를 deprecated로 표시함(`pthread_getugid_np`는 아님). Swift 6.4 `@diagnose(DeprecatedDeclaration, as: ignored)`로 함수 단위로만 끌 수 있음. 스레드 단위 권한은 파일을 열 때의 권한 검사에만 효과가 있고 코드 실행을 가두지 못함(Q42). 일반 사용자가 root 파일에 하드링크를 걸어 링크 수를 올릴 수 있음(Q43). `/etc`·`/var`·`/tmp`는 링크라 `O_NOFOLLOW_ANY`에서 `/private/…`로 적어야 함. `dscl -plist`는 `-read`에만 먹고 `-list`는 텍스트, 없는 속성이 있어도 exit 0. `lstat`은 끝에 `/`가 붙은 링크를 따라감. `String(format:)`은 strict memory safety에서 unsafe. 사용자 FSKit 볼륨의 파일은 root에게 uid 501로 보임.
+- 바뀐 결정: D25(권한은 여는 동안만, root 파일은 root 전용 폴더 규칙·누구나 읽을 수 있을 때만 내용), D26·T23(파싱은 별도 프로세스 — Q42, 설계 대기), T4, WO-9 시그니처(`async`, `user(uid:)`), WO-11 `CheckContext.user`와 `user-scope` 실패, WO-19 시험 목록.
+- 남은 것: WO-9 최종 리뷰의 남은 것 5가지와 Q46(WO-11 전), Q42 설계안(WO-16 전), Q45(WO-16 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).

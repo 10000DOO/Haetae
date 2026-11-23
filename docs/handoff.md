@@ -1,6 +1,6 @@
 # 다음 세션 시작 프롬프트
 
-> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-21 (WO-8 재리뷰 3까지 반영)
+> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-9 완료 시점)
 
 ```
 Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 루트
@@ -12,16 +12,20 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
    - 필요할 때만 1-1(요구사항 R1~R19), 3-1·3-2(다이어그램), 3-5(감시 대상), 7장(검증), 9장(Q1~Q40)
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
-## 현재 상태 (2026-11-21)
-- 문서 상태 `구현중`. WO-1~8 `[x]`, WO-9~46 `[ ]`.
+## 현재 상태 (2026-11-23)
+- 문서 상태 `구현중`. WO-1~9 `[x]`, WO-10~46 `[ ]`.
   - Phase 1(WO-1~7): 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구(`Tools/xpc-probe/`).
-  - Phase 2: WO-8 `CommandRunner`(`HaetaeKit/Sources/HaetaeChecks/Engine/CommandRunner.swift`)까지. 리뷰 2개(보안, 설계·동시성)와 재리뷰 3번을 반영했다(마지막: 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). 단위 테스트는 WO-19에서 쓴다.
+  - Phase 2: WO-8 `CommandRunner`, WO-9 `SafeFileReader`·`UserDirectory`(`HaetaeKit/Sources/HaetaeChecks/Engine/`)까지. 둘 다 별도 에이전트 리뷰를 반영했다(WO-8은 재리뷰 3번까지 — 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). WO-9는 사용자 sudo로 root 경로도 확인했다. 단위 테스트는 WO-19에서 쓴다.
 - Phase 1 검증: 7-1은 별도 에이전트가 끝냈다(구현 결함 0건). 남은 것은 사용자 확인뿐이다.
   - 7-2 R16(XPC 거부 결과를 받아들이는지) — 사용자 답 대기
   - 로그아웃 뒤 자동 실행(7-2 R2·R12, 7-1 P1 "등록 흐름"의 로그아웃 항목) — 사용자가 로그아웃했다고 하면 그 시각의 데몬 로그에 `markUserQuit`이 있는지 본다
   - "끄면 다음 로그인 때 안 뜬다"는 사용자 결정으로 건너뜀. "검증 실패 표시"는 Phase 6로 옮김.
   - 사용자 지시로 이 확인들을 남긴 채 Phase 2를 시작했다.
-- 미정인 결정: Q40(`launchctl asuser`가 uid를 바꾸지 않음 — WO-26 전에 사용자에게 번호로 묻는다). 지금 작업은 막지 않는다.
+- 미정인 결정 (지금 작업은 막지 않는다):
+  - Q42는 "2번(사용자 파일 파싱을 권한을 내린 별도 프로세스로)"으로 결정됐지만 방식은 아직 없다. WO-16 전에 설계안(프로세스 형태, 권한 내리는 법, 대상 형식 — plist·JSON·sqlite·셸 기록)을 만들어 번호 선택지로 확인받고 새 WO로 넣는다. Q40(`launchctl asuser`)과 같은 "권한을 내린 자식 프로세스" 문제라 함께 보면 좋다.
+  - Q46(사용자 파일의 "링크 수 1" 규칙이 다른 사용자의 하드링크로 오탐을 냄) — WO-11 전. WO-9 최종 리뷰의 남은 코드 수정 4가지(WO-9 "최종 코드 리뷰" 줄)도 WO-11 전에 함께 고친다.
+  - Q45(`/private/var/at/jobs`가 daemon 소유) — WO-16 전.
+  - Q40(`launchctl asuser`가 uid를 바꾸지 않음) — WO-26 전.
 - 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다. 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다.
 - 서명: 두 타깃 Apple Development, Personal Team 47XT7DPDLP. hardened runtime 켜짐.
 - 도구: swift-lsp 플러그인 + buildServer.json, codegraph 인덱스(.codegraph/), Peekaboo MCP, 스킬 write-swift·swift-testing-expert·swiftui-expert-skill·swift-concurrency·paseo-handoff·reviewer.
@@ -41,5 +45,5 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 에이전트가 못 하는 것: sudo(사용자에게 터미널 명령을 주고 실행을 부탁), `sfltool dumpbtm`(인증 창에서 멈춤 — 실행 금지), 메뉴 막대 아이콘 클릭(패널 확인은 사용자에게 부탁, 화면이 잠겨 있으면 화면 도구가 아예 안 된다). `log show`는 `rtk proxy log show …`로 실행한다.
 
 ## 다음 할 일
-WO-9(`SafeFileReader`·`UserDirectory`)부터 시작한다. `CommandRunner`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `--`, 성공 판정, 최대 시간). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
+WO-10(지문·기준값·기록 저장소)부터 시작한다. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
 ```
