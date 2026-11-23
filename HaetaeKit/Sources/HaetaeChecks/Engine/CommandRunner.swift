@@ -3,7 +3,7 @@ import Synchronization
 
 /// 명령을 한 번 실행한 결과. `stdout`·`stderr`는 각각 `maxBytes`까지만 담는다.
 ///
-/// 성공으로 보려면 `!timedOut && !terminatedBySignal && exitCode == 0`을 모두 확인한다.
+/// 성공 판정은 `succeeded`(`!timedOut && !terminatedBySignal && exitCode == 0`)로 한다.
 /// SIGTERM을 받고 스스로 0으로 끝난 명령은 `timedOut`인데 `exitCode`가 0이다.
 public struct CommandOutput: Sendable, Equatable {
     public let stdout: Data
@@ -14,6 +14,9 @@ public struct CommandOutput: Sendable, Equatable {
     /// 상한을 넘겨 잘렸거나, 프로세스가 끝난 뒤에도 파이프가 닫히지 않아 끝까지 읽었는지 알 수 없다.
     public let truncated: Bool
     public let timedOut: Bool
+
+    /// 출력이 다 왔는지는 따로 `truncated`로 본다.
+    public var succeeded: Bool { !timedOut && !terminatedBySignal && exitCode == 0 }
 }
 
 public enum CommandError: Error, Equatable {
