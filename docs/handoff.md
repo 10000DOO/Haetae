@@ -1,34 +1,41 @@
 # 다음 세션 시작 프롬프트
 
-> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-23 (WO-50 완료 시점)
+> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-24 (WO-51·52 완료 시점)
 
 ```
 Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 루트
+
+## 맨 먼저
+`git fetch` 후 `git log main..origin/main`을 본다. 다른 세션이 먼저 push했으면 pull(fast-forward)한 뒤 이 문서를 다시 읽는다(2026-11-23에 로컬이 3커밋 뒤처져 낡은 문서로 시작한 적이 있다).
 
 ## 먼저 읽을 것 (전부 읽지 말고 이 순서로)
 1. docs/haetae-security-monitor.md — 단일 진실 소스(SSOT, 약 250KB). 처음부터 끝까지 읽지 말고 `rg -n`으로 찾아서:
    - 맨 위 헤더(상태·다음 액션), 0장(문서 규칙), 8장(주의사항)
    - 지금 할 WO(6장 "### WO-N")와 그 WO가 가리키는 3-3 결정(D#), XPC 관련이면 3-7
-   - 필요할 때만 1-1(요구사항 R1~R19), 3-1·3-2(다이어그램), 3-5(감시 대상), 7장(검증), 9장(Q1~Q40)
+   - 필요할 때만 1-1(요구사항 R1~R19), 3-1·3-2(다이어그램), 3-5(감시 대상), 7장(검증), 9장(Q1~Q56)
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
-## 현재 상태 (2026-11-23)
-- 문서 상태 `구현중`. WO-1~10·WO-47~50 `[x]`, WO-51·WO-11~46 `[ ]`.
+## 현재 상태 (2026-11-24)
+- 문서 상태 `구현중`. WO-1~10·WO-47~52 `[x]`, WO-11~46 `[ ]`.
   - Phase 1(WO-1~7): 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구(`Tools/xpc-probe/`).
-  - Phase 2: WO-8 `CommandRunner`, WO-9 `SafeFileReader`·`UserDirectory`(`HaetaeKit/Sources/HaetaeChecks/Engine/`)까지. 둘 다 별도 에이전트 리뷰를 반영했다(WO-8은 재리뷰 3번까지 — 실행 파일은 링크 없이 닿는 시스템 볼륨의 파일만, 정리는 항상 `killpg`부터). WO-9는 사용자 sudo로 root 경로도 확인했다. WO-47·48(해석 전용 프로세스 — `haetaed --parse plist`가 입력 전에 nobody로 내려감(sudo로 확인), 데몬은 자기 cdhash에 묶어서만 띄우는 `IsolatedParser`)까지 끝. 단위 테스트는 WO-19에서 쓴다.
+  - Phase 2에서 끝난 것(모두 별도 에이전트 리뷰 반영, 단위 테스트는 WO-19):
+    - WO-8 `CommandRunner` — 셸 없이 SIP 경로의 시스템 볼륨 파일만 실행. stdin 입력과 "자기 실행 파일(cdhash 요구사항)" 허용은 해석 서비스가 쓴다.
+    - WO-9 `SafeFileReader`·`UserDirectory` — 사용자 파일은 그 사용자 권한으로 열기, 시스템 파일은 root 전용 폴더 규칙, 전용 스레드·취소·상한. sudo로 root 경로 확인함.
+    - WO-10 `Fingerprint`·`SecureDirectory`·`BaselineStore`·`FindingLedger`(`HaetaeChecks/Store/`) — 사용자별 기준값·원장, pending 상한, 알림 완료 사본.
+    - WO-47~50 사용자 파일 해석 분리 — 새 타깃 `haetae-parser`(해석 서비스: 별도 서명 정체, launchd가 nobody로 띄움, 파일마다 자기를 `--parse`로 띄워 그 자식이 해석, 유휴 30초 종료). 데몬은 `IsolatedParser`(XPC 클라이언트)로 맡기고 결과만 검증한다. `haetaed --parse`는 없앴다. 구조와 실측은 6장 WO-49·50, 주의사항은 8장 "해석 서비스"·"`IsolatedParser`" 항목.
+    - WO-51·52 — 앱이 해석 서비스도 등록(`ServiceRegistrar`). 실측에서 해석 서비스가 데몬의 전체 디스크 접근을 그대로 받는 것이 드러나(TCC는 같은 앱 번들로 본다) 해석 자식이 입력 전에 전부 막는 샌드박스에 들어가게 했다(`ParserProcess.enterSandbox`, Q56 1번 — 문서에 없는 `sandbox_init` 호출이라 OS가 막으면 자식이 77로 끝나고 서비스가 `unavailable`로 답한다). 실측과 남는 위험은 6장 WO-51·52, 8장 "해석 자식".
 - Phase 1 검증: 7-1은 별도 에이전트가 끝냈다(구현 결함 0건). 남은 것은 사용자 확인뿐이다.
   - 7-2 R16(XPC 거부 결과를 받아들이는지) — 사용자 답 대기
   - 로그아웃 뒤 자동 실행(7-2 R2·R12, 7-1 P1 "등록 흐름"의 로그아웃 항목) — 사용자가 로그아웃했다고 하면 그 시각의 데몬 로그에 `markUserQuit`이 있는지 본다
   - "끄면 다음 로그인 때 안 뜬다"는 사용자 결정으로 건너뜀. "검증 실패 표시"는 Phase 6로 옮김.
-  - 사용자 지시로 이 확인들을 남긴 채 Phase 2를 시작했다.
-- 사용자 파일 해석(Q42·Q48 2번·Q54 1번): 데몬은 `IsolatedParser`로 해석 서비스 `haetae-parser`(별도 서명 정체, launchd가 nobody로 띄움, 파일마다 자식 프로세스)에 맡긴다. 검사에 연결(`ctx.parser`, 요구사항 만들기)은 WO-11·12에서 한다(WO-12 본문의 "해석 서비스 연결" 줄).
+  - 사용자 지시로 이 확인들을 남긴 채 Phase 2를 진행 중이다.
+- 정해진 결정(9장 Q41~Q56, 본문 반영 끝): 해석 자식은 샌드박스에(Q56), 사용자 파일도 링크 수를 보지 않음(Q46), 해석은 별도 프로그램으로(Q42·Q48 2번·Q54 1번), 기준값은 사용자별(Q50), 위험 항목은 기준값에 넣지 않음(Q51), pending이 넘치면 낮은 수준의 새 것부터 버림(Q52), 알림 완료 사본을 데몬이 보관해 다시 보냄(Q53), pending 기준값 장치는 유지(Q55).
 - 미정인 결정 (지금 작업은 막지 않는다):
-  - Q48은 2번(해석 프로그램을 따로 두고 데몬 권한과 연결을 끊음), 방식은 Q54 1번(launchd가 띄우는 별도 데몬)으로 결정됨 — 다음 작업.
-  - Q49(launchd가 바꿔치기된 데몬을 띄우는 경우 — `SpawnConstraint`) — WO-45 전.
+  - Q49(launchd가 바꿔치기된 데몬·해석 서비스를 띄우는 경우 — `SpawnConstraint`) — WO-45 전.
   - Q45(`/private/var/at/jobs`가 daemon 소유) — WO-16 전.
   - Q40(`launchctl asuser`가 uid를 바꾸지 않음) — WO-26 전.
-- 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다. 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다.
-- 서명: 두 타깃 Apple Development, Personal Team 47XT7DPDLP. hardened runtime 켜짐.
+- 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다(2026-11-24 WO-52 빌드 — 해석 서비스까지 등록됨, 전체 디스크 접근 목록에 Haetae가 켜져 있다). 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다.
+- 서명: 세 타깃(`Haetae`·`haetaed`·`haetae-parser`) Apple Development, Personal Team 47XT7DPDLP. hardened runtime 켜짐.
 - 도구: swift-lsp 플러그인 + buildServer.json, codegraph 인덱스(.codegraph/), Peekaboo MCP, 스킬 write-swift·swift-testing-expert·swiftui-expert-skill·swift-concurrency·paseo-handoff·reviewer.
 - git: main이 origin/main에 push돼 있다(public 저장소). 커밋 이메일은 저장소 로컬 설정(개인 이메일)이라 바꾸지 않는다.
 
@@ -39,12 +46,15 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 - 테스트 WO(WO-19, 25, 35, 42)는 직접 쓰지 말고 paseo-handoff로 별도 에이전트에게 넘긴다. 7-1 검증도 구현하지 않은 별도 에이전트가 실제로 실행한다.
 - WO마다 코드 리뷰: 구현이 끝나면 별도 에이전트 여럿에게 관점을 나눠 맡긴다(보안 / 설계·동시성·확장성, 수정 금지). 지적은 구현 쪽이 설계 원칙·보안을 지키며 고치고, 고친 것은 재리뷰를 받는다. 설계 변경이 필요한 지적은 9장에 올려 묻는다.
   - 에이전트: Paseo `create_agent`, provider `claude/claude-opus-5-5`, `settings: {modeId: "auto", thinkingOptionId: "xhigh"}`. `create_agent`는 다른 도구 호출과 한 번에 보내지 않는다. 결과는 그대로 믿지 말고 핵심 근거를 직접 확인한다.
-- 커밋·push는 사용자가 지시할 때만 한다(지금까지 WO마다 "커밋 푸시 해"로 지시해 왔다). 제목은 `type: 요약`(feat·fix·docs·build·chore·test), 성격이 다르면 나누고 Phase·WO 번호는 본문에. AI 서명(Co-Authored-By) 금지. 커밋과 push는 따로 실행한다.
+- 커밋·push는 사용자가 지시할 때만 한다(2026-11-23 세션에서는 "리뷰에서 문제 없으면 커밋 푸시 하고 다음 작업으로 이어가"라는 지시로 WO마다 커밋·push했다 — 새 세션에서는 다시 확인한다). 제목은 `type: 요약`(feat·fix·docs·build·chore·test), 성격이 다르면 나누고 Phase·WO 번호는 본문에. AI 서명(Co-Authored-By) 금지. 커밋과 push는 따로 실행한다.
 - 커밋 전 개인정보 확인(public 저장소): 7-1 공통 "개인정보" 항목의 `rg` 명령 2개(계정 이름은 대소문자 구분, 나머지는 `-i`) → 둘 다 0곳. `rg`가 rtk에 감싸여 실패하면 exit 1이 나와 "결과 없음"과 같으니 stderr를 꼭 본다. 회사 정보·실명·로컬 절대 경로를 저장소에 넣지 않는다.
 - 3-3 결정(D1~D32)·2장 Out에서 벗어나는 것, 사용자 판단이 필요한 것은 임의로 정하지 말고 9장에 올린 뒤 번호 선택지로 묻는다.
 - 빌드 설정(Debug/Release, 배포 타깃, 팀)은 WO에 적힌 것 외에는 바꾸지 않는다.
+- sudo 없이 launchd 동작을 시험할 때는 사용자 도메인 임시 작업을 쓴다(`launchctl bootstrap gui/$(id -u) <plist>` → 시험 → `launchctl bootout`, 끝나면 반드시 지운다 — 8장). 시험 파일은 저장소 밖(`/private/tmp`)에 만들고 지운다.
 - 에이전트가 못 하는 것: sudo(사용자에게 터미널 명령을 주고 실행을 부탁), `sfltool dumpbtm`(인증 창에서 멈춤 — 실행 금지), 메뉴 막대 아이콘 클릭(패널 확인은 사용자에게 부탁, 화면이 잠겨 있으면 화면 도구가 아예 안 된다). `log show`는 `rtk proxy log show …`로 실행한다.
 
 ## 다음 할 일
-WO-51은 코드를 커밋했고 사용자 확인만 남았다(해석 서비스 — 앱 등록 쪽 — 사용자가 새 빌드를 sudo로 설치·승인하고, haetaed에 전체 디스크 접근을 준 상태에서 해석 서비스가 시스템 `TCC.db`를 못 여는지 확인해야 한다). 해석 서비스는 새 타깃 `haetae-parser`(WO-49)이고 방식과 실측은 6장 WO-49, 주의사항은 8장 "해석 서비스" 항목에 있다. 그다음 WO-11. `CommandRunner`·`SafeFileReader`·`UserDirectory`를 쓸 때 주의할 점은 8장에 있다(허용 경로와 링크 거부, `/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
+1. WO-11(`SecurityCheck`·`CheckRunner`·기본 패턴 팩·`SecretMasker`). 본문에 이번 세션의 결정이 들어가 있다: `CheckContext.user`(1명)·`parser`, `baselineVersion`, 위험 항목은 `newBaseline`에서 빼기(Q51), 저장 순서(`filterNew` → `savePending` → `confirmPending` → `setLastSuccess` → `resolved`), 상태 Finding은 두 번째 `filterNew`로, `title`·`evidence`의 제어 문자 빼기, 깨진 기준값 3번이면 `quarantine`.
+2. WO-12에서 해석 서비스 연결(요구사항 만들기)과 신원 확인 코드 세 벌 모으기를 함께 한다(본문에 줄이 있다).
+`CommandRunner`·`SafeFileReader`·`UserDirectory`·`IsolatedParser`·저장소를 쓸 때 주의할 점은 8장에 있다(`/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기, `parse`는 한 번에 하나씩, 해석 자식 안에서는 파일·로캘이 필요한 API 금지, `unavailable`은 검사 실패 1건·`failed`는 파일별 Finding 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다.
 ```
