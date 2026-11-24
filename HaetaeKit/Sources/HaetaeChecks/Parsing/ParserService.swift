@@ -4,8 +4,8 @@ import LightweightCodeRequirements
 import Security
 import Synchronization
 
-/// 해석 서비스(`haetae-parser`, Q48·Q54). launchd가 nobody로 띄우는 별도 실행 파일이라 데몬의 TCC 권한(전체 디스크 접근)을
-/// 물려받지 않는다 — TCC는 계정이 아니라 코드 서명 정체로 판단한다. 이 프로세스는 바이트를 나르기만 하고 해석하지 않는다.
+/// 해석 서비스(`haetae-parser`, Q48·Q54). launchd가 nobody로 띄우는 별도 실행 파일이다. 데몬의 전체 디스크 접근은 그대로
+/// 받으므로(WO-51 실측 — TCC는 같은 앱 번들로 본다) 바이트를 나르기만 하고, 해석은 샌드박스에 든 자식이 한다(Q56).
 /// 파일마다 자기 실행 파일을 `--parse`로 띄워 그 자식이 해석한다(launchd는 서비스를 1초에 한 번만 다시 띄워 주므로 직접 띄운다).
 public enum ParserService {
     private static let idleLimit: Duration = .seconds(30)
@@ -121,8 +121,10 @@ public enum ParserService {
                     let output = try await runner.run(
                         executable, ["--parse", format], stdin: data, timeout: .seconds(5), maxBytes: ParserLimits.maxOutputBytes
                     )
-                    // 시간 초과가 아닌 SIGKILL은 서명 요구사항에 걸린 것이다(디스크의 빌드가 바뀜) — 파일 탓이 아니다.
-                    let unavailable = output.terminatedBySignal && output.exitCode == SIGKILL && !output.timedOut
+                    // 시간 초과가 아닌 SIGKILL은 서명 요구사항에 걸린 것이고(디스크의 빌드가 바뀜), 77은 권한·샌드박스·자원 상한을
+                    // 못 건 것이다(OS가 샌드박스 호출을 막음) — 둘 다 파일 탓이 아니다.
+                    let blocked = !output.terminatedBySignal && output.exitCode == ParserProcess.exitNoPermission
+                    let unavailable = blocked || (output.terminatedBySignal && output.exitCode == SIGKILL && !output.timedOut)
                     reply(output.succeeded && !output.truncated ? output.stdout : nil, unavailable)
                 } catch {
                     reply(nil, true)

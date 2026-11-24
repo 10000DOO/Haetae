@@ -2,17 +2,19 @@ import Foundation
 import HaetaeShared
 
 /// 공격자가 쓸 수 있는 파일을 해석하는 전용 프로세스(Q42·Q47). 데몬이 자기 실행 파일을 `--parse <형식>`으로 다시 띄운다.
-/// 해석기가 뚫려도 할 수 있는 일이 적게, 입력을 읽기 전에 nobody로 내려가고 자원을 제한한다.
+/// 해석기가 뚫려도 할 수 있는 일이 적게, 입력을 읽기 전에 nobody로 내려가고 샌드박스에 들어가고 자원을 제한한다.
 public enum ParserProcess {
-    /// 종료 코드(sysexits). 뚫린 자식은 종료 코드를 마음대로 고를 수 있으니 서비스(WO-49)는 0인지만 믿는다.
+    /// 종료 코드(sysexits). 뚫린 자식은 종료 코드를 마음대로 고를 수 있다 — 서비스(WO-49)는 0이면 출력을 넘기고,
+    /// 77이면 `unavailable`로 답한다(77을 골라도 0으로 가짜 결과를 내는 것보다 얻는 것이 없다).
     static let exitUsage: Int32 = 64
     static let exitBadInput: Int32 = 65
     static let exitNoPermission: Int32 = 77
 
     /// stdin의 내용을 해석해 `ParsedValue`를 JSON으로 stdout에 쓰고 끝낸다. 결과는 stdout으로만 나간다.
     public static func run(arguments: [String]) -> Never {
-        // 순서를 바꾸지 않는다 — 권한과 자원 상한이 먼저, 공격자 데이터는 그 뒤.
-        guard dropPrivileges(), limitResources() else { exit(exitNoPermission) }
+        // 순서를 바꾸지 않는다 — 권한·샌드박스·자원 상한이 먼저, 공격자 데이터는 그 뒤.
+        // 샌드박스는 fd 상한보다 먼저다: 막혔는지 확인하려면 파일을 열어 봐야 한다.
+        guard dropPrivileges(), enterSandbox(), limitResources() else { exit(exitNoPermission) }
         guard arguments.count == 1, let format = ParseFormat(rawValue: arguments[0]) else { exit(exitUsage) }
         do {
             var input = Data()
@@ -115,8 +117,23 @@ public enum ParserProcess {
         return setuid(0) != 0 && setgid(0) != 0
     }
 
+    /// 파일 열기·네트워크·exec·Mach 조회를 모두 막는다(Q56 1번). 해석 서비스는 nobody여도 데몬의 전체 디스크 접근을
+    /// 그대로 받는다(WO-51 실측 — TCC는 같은 앱 번들로 본다). 이미 열린 stdin·stdout은 계속 쓸 수 있다.
+    /// shortcut: 문서에 없는 호출(플래그 0 + 프로필 문자열)이다 — OS가 막으면 77로 끝나 해석이 `unavailable`이 된다, 그때 Q56을 다시 연다.
+    static func enterSandbox() -> Bool {
+        typealias SandboxInit = @convention(c) (UnsafePointer<CChar>, UInt64, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32
+        // Swift에서는 `sandbox_init`이 unavailable이라 이름으로 찾는다. -2는 RTLD_DEFAULT.
+        guard let symbol = unsafe dlsym(UnsafeMutableRawPointer(bitPattern: -2), "sandbox_init"),
+              unsafe unsafeBitCast(symbol, to: SandboxInit.self)("(version 1)(deny default)", 0, nil) == 0
+        else { return false }
+        // 반환값만 믿지 않는다 — nobody도 읽을 수 있는 `/`가 열리면 적용되지 않은 것이다.
+        let probe = unsafe open("/", O_RDONLY | O_CLOEXEC)
+        if probe >= 0 { close(probe) }
+        return probe < 0 && errno == EPERM
+    }
+
     /// 뚫렸을 때 할 수 있는 일을 줄인다: CPU 시간, 파일 쓰기, core 파일, fork(`RLIMIT_NPROC` — exec는 못 막는다).
-    /// fd 상한 3은 상속된 fd가 없다는 것만 보장한다 — 0·1·2 중 하나를 닫으면 새 파일·소켓을 열 수 있어 경계가 아니다(Q48).
+    /// fd 상한 3은 새 fd를 못 만들게 할 뿐이다 — 0·1·2 중 하나를 닫으면 fd 번호가 남아 경계가 아니다(Q48). 여는 것은 샌드박스가 막는다.
     /// 메모리 상한은 이 OS에서 `setrlimit`가 받지 않아 출력 크기 예산으로 대신한다.
     static func limitResources() -> Bool {
         let limits: [(Int32, rlim_t)] = [(RLIMIT_CPU, 10), (RLIMIT_FSIZE, 0), (RLIMIT_NOFILE, 3), (RLIMIT_CORE, 0), (RLIMIT_NPROC, 0)]

@@ -13,8 +13,8 @@ public enum IsolatedParserError: Error, Equatable {
     case unavailable
 }
 
-/// 공격자가 쓸 수 있는 파일은 이것으로만 해석한다(Q42·Q48). 해석은 해석 서비스(`haetae-parser`, WO-49)가 한다 —
-/// 데몬과 서명 정체가 달라 데몬의 TCC 권한을 물려받지 않는다. 데몬은 서명을 확인한 서비스에 바이트를 넘기고 결과만 검증한다.
+/// 공격자가 쓸 수 있는 파일은 이것으로만 해석한다(Q42·Q48). 해석은 해석 서비스(`haetae-parser`, WO-49)가 한다.
+/// 데몬은 서명을 확인한 서비스에 바이트를 넘기고 결과만 검증한다.
 public struct IsolatedParser: Sendable {
     /// 서비스 한 건의 최대 시간(자식 5초 + 정리 6초)보다 길어야 한다 — 짧으면 느린 파일이 `failed`가 아니라 `unavailable`이 된다.
     private static let replyTimeout: DispatchTimeInterval = .seconds(15)
