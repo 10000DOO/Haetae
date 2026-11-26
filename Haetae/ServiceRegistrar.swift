@@ -1,4 +1,5 @@
 import AppKit
+import HaetaeShared
 import os
 import ServiceManagement
 
@@ -110,37 +111,10 @@ struct ServiceRegistrar {
         guard let identity else { return false }
         let root = Bundle.main.bundleURL.resolvingSymlinksInPath()
         guard root.deletingLastPathComponent().path == "/Applications" else { return false }
-        // 읽지 못한 폴더를 건너뛰고 통과시키지 않는다.
-        var enumerationFailed = false
-        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil, errorHandler: { _, _ in
-            enumerationFailed = true
-            return false
-        }) else { return false }
-        var paths = [root.path]
-        for case let url as URL in enumerator { paths.append(url.path) }
-        guard !enumerationFailed else { return false }
-        // 번들 안 모든 항목이 uid 0이고 그룹·기타 쓰기 비트와 ACL이 없어야 한다. 링크는 따라가지 않는다.
-        let ownedByRoot = paths.allSatisfy { path in
-            var info = stat()
-            guard unsafe lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & 0o022 == 0 else { return false }
-            // ACL이 없으면 NULL + ENOENT다. 다른 오류는 "ACL 없음"으로 보지 않는다.
-            guard let acl = unsafe acl_get_link_np(path, ACL_TYPE_EXTENDED) else { return errno == ENOENT }
-            unsafe acl_free(UnsafeMutableRawPointer(acl))
-            return false
-        }
-        return ownedByRoot && Self.staticSignatureIsValid(root, requirement: identity.teamRequirement)
-    }
-
-    /// 추가된 파일, 번들 밖을 가리키는 링크(`kSecCSRestrictSymlinks`), 바뀐 중첩 코드(데몬)를 잡는다.
-    private static func staticSignatureIsValid(_ bundle: URL, requirement: String) -> Bool {
-        var code: SecStaticCode?
-        var compiled: SecRequirement?
-        guard unsafe SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code,
-              unsafe SecRequirementCreateWithString(requirement as CFString, [], &compiled) == errSecSuccess, let compiled else {
-            return false
-        }
-        let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode | kSecCSCheckAllArchitectures | kSecCSRestrictSymlinks)
-        return SecStaticCodeCheckValidity(code, flags, compiled) == errSecSuccess
+        // 데몬이 시작할 때 보는 것과 같은 검사다(D20).
+        let problems = BundleIntegrity.problems(in: root, requirement: identity.appRequirement)
+        if !problems.isEmpty { Log.app.error("번들 검사 실패 — 등록하지 않음 (\(problems.count)건)") }
+        return problems.isEmpty
     }
 
     private func isGenuine(pid: pid_t) -> Bool {

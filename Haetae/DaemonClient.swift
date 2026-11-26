@@ -30,8 +30,9 @@ private nonisolated final class Once<T: Sendable>: Sendable {
 /// 데몬 연결 하나를 쥐고 있는다. 앱이 연결을 쥐고 있는 동안 데몬이 떠 있다(D15).
 @MainActor
 final class DaemonClient {
-    /// shortcut: 모든 호출이 검사 한 바퀴 상한 + 5초다, `collect`가 다른 사용자 실행을 기다리는 시간까지 잡을 때(WO-12) `collect`만 나눈다.
-    private static let callTimeout: Duration = HaetaeLimits.maxRunDuration + .seconds(5)
+    /// 데몬은 사용자마다 줄을 세워 검사한다. 다른 사용자 실행 하나를 기다리는 시간까지 잡는다(Q63). 셋 이상 겹쳐 넘치면 다시 시도가
+    /// 같은 실행의 결과를 받는다(데몬이 같은 uid 요청을 합친다).
+    private static let collectTimeout: Duration = HaetaeLimits.maxRunDuration * 2 + .seconds(5)
     private static let quitTimeout: Duration = .seconds(2)
     /// 무효화된 뒤 다시 시도하기 전에 기다리는 시간. 옛 데몬이 꺼지고 새 데몬이 뜰 시간을 준다(D20).
     private static let retryDelays: [Duration] = [.seconds(5), .seconds(15), .seconds(30)]
@@ -47,20 +48,27 @@ final class DaemonClient {
 
     func collect() async throws -> CollectResult {
         var sawVerificationFailure = false
-        #if DEBUG
-        var sawStaleDaemon = false
-        #endif
+        var waitedForRateLimit = false
         for delay in [Duration.zero] + Self.retryDelays {
             if delay > .zero { try await Task.sleep(for: delay) }
             // Release에서는 빌드가 다르면 서명 요구사항 때문에 응답이 오지 않는다. 응답 대신 디스크의 자기 빌드를 본다.
             if diskBuild() > identity.build { throw DaemonClientError.needsRelaunch }
             let data: Data
             do {
-                data = try await call(timeout: Self.callTimeout) { proxy, once in
+                data = try await call(timeout: Self.collectTimeout) { proxy, once in
                     proxy.collect { data, error in
                         once.resume(with: data.map(Result.success) ?? .failure(Self.decode(error)))
                     }
                 }
+            } catch HaetaeXPCError.updating {
+                // 옛 데몬이 곧 끝난다. 연결을 놓아야 끝날 수 있다(D20).
+                dropConnection()
+                continue
+            } catch HaetaeXPCError.rateLimited where !waitedForRateLimit {
+                // 방금 다시 뜬 앱처럼 이 사용자의 검사가 막 시작됐다. 간격이 지나면 한 번 더 묻는다.
+                waitedForRateLimit = true
+                try await Task.sleep(for: HaetaeLimits.minCollectInterval)
+                continue
             } catch let error as HaetaeXPCError {
                 throw error
             } catch {
@@ -78,22 +86,22 @@ final class DaemonClient {
             let daemonBuild = try CollectResult.decodeHeader(data).daemonBuild
             if daemonBuild > identity.build { throw DaemonClientError.needsRelaunch }
             if daemonBuild < identity.build {
-                // 연결을 쥐고 있으면 옛 데몬이 유휴 종료하지 못한다.
+                // 등록된 데몬(root 사본)이 이 앱보다 옛 빌드다. 다시 시도해도 launchd는 같은 옛 파일을 띄우니 바로 끝낸다. 연결을 놓기
+                // 전에 사용자 종료로 알린다 — 그냥 끊으면 데몬이 비정상 종료와 검사 공백으로 적는다.
+                await markUserQuit()
                 dropConnection()
-                sawStaleDaemon = true
-                continue
+                throw DaemonClientError.staleDaemon
             }
             #endif
             return try CollectResult.decodeValidated(data)
         }
-        #if DEBUG
-        if sawStaleDaemon { throw DaemonClientError.staleDaemon }
-        #endif
         throw sawVerificationFailure ? DaemonClientError.verificationFailed : DaemonClientError.noResponse
     }
 
     /// 사용자가 끄거나 의도해서 다시 뜰 때만 부른다. 데몬이 비정상 종료로 기록하지 않게 한다(D28).
     func markUserQuit() async {
+        // 쥔 연결이 없으면 데몬이 비정상 종료로 적을 끊김도 없다. 새로 연결하면 업데이트 뒤 새 데몬이 옛 앱을 검증 실패로 센다.
+        guard connection != nil else { return }
         _ = try? await call(timeout: Self.quitTimeout) { (proxy, once: Once<Bool>) in
             proxy.markUserQuit { once.resume(with: .success(true)) }
         }
@@ -127,6 +135,15 @@ final class DaemonClient {
         // resume 전에 건다. 응답마다 다시 검사되므로 연결 도중 데몬이 바뀌어도 끊긴다.
         connection.setCodeSigningRequirement(identity.daemonRequirement)
         let id = ObjectIdentifier(connection)
+        // 데몬이 끝나면(업데이트·충돌) 연결은 무효화되지 않고 중단만 된다. 같은 연결로 다시 보내면 launchd가 새 데몬을 띄우는데,
+        // 그 데몬이 이 앱을 옛 빌드로 거부하면 검증 실패로 센다. 연결을 놓고 처음부터 다시 연결한다(무효화와 같이 처리).
+        connection.interruptionHandler = { @Sendable [weak self] in
+            Task { @MainActor in
+                guard let self, self.connection.map(ObjectIdentifier.init) == id else { return }
+                self.dropConnection()
+                self.onInvalidated?()
+            }
+        }
         connection.invalidationHandler = { @Sendable [weak self] in
             Task { @MainActor in
                 // 늦게 도착한 옛 연결의 무효화가 새 연결을 지우지 않게 한다.

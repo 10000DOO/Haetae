@@ -1,4 +1,5 @@
 import Foundation
+import HaetaeChecks
 import HaetaeShared
 import os
 
@@ -11,7 +12,41 @@ if probe >= 0 { close(probe) }
 Log.service.notice("probe: uid \(getuid(), privacy: .public) TCC.db \(probeResult, privacy: .public)")
 #endif
 
-let delegate = ListenerDelegate(configuration: DaemonConfiguration.load())
+let configuration = DaemonConfiguration.load()
+let directory = SecureDirectory()
+let ledger = FindingLedger(directory: directory)
+
+// 시작할 때 한 번 자기 번들을 본다(D20). 요구사항이 없으면 어차피 모든 연결을 거부한다.
+let selfIntegrity = configuration.appRequirement.map { BundleIntegrity.problems(in: Bundle.main.bundleURL, requirement: $0) } ?? []
+if !selfIntegrity.isEmpty { Log.listener.fault("자기 번들 검사 실패 (\(selfIntegrity.count)건)") }
+
+// Debug는 `highest-build`를 읽지도 쓰지도 않는다(Q34 — Debug와 Release가 같은 root 폴더를 쓴다). 신원 확인에 실패해 빌드를
+// 모르면(모든 연결 거부) 건드리지 않는다 — 0을 기록하거나 "되돌린 빌드"로 잘못 적지 않게.
+let highestBuild = configuration.variant == .release && configuration.appRequirement != nil
+    ? HighestBuild.update(running: configuration.build, in: directory) : nil
+
+// `CommandRunner`는 데몬 전체에서 하나만 만든다 — 직렬화가 인스턴스 단위라 연결마다 만들면 D26의 "동시 1개"가 깨진다.
+let checkRunner = CheckRunner(
+    checks: CheckRegistry.all + [SelfIntegrityCheck(problems: selfIntegrity)], baseline: BaselineStore(directory: directory), ledger: ledger,
+    runner: CommandRunner(), parser: configuration.parser, daemonBuild: configuration.build
+)
+let coordinator = CollectCoordinator(
+    runner: checkRunner, ledger: ledger, build: configuration.build, highestBuild: highestBuild, selfIntegrity: selfIntegrity
+)
+if coordinator.isRolledBack { Log.listener.fault("되돌린 빌드 — 모든 요청 거부") }
+
+let delegate = ListenerDelegate(configuration: configuration, coordinator: coordinator)
+// launchd가 bootout·시스템 종료 때 보내는 SIGTERM에서도 묶어 둔 기록을 적고 끝낸다(SIGKILL까지 기본 20초).
+signal(SIGTERM, SIG_IGN)
+let termination = DispatchSource.makeSignalSource(signal: SIGTERM)
+termination.setEventHandler {
+    Task {
+        await coordinator.prepareForExit()
+        DaemonExit.now()
+    }
+}
+termination.resume()
+
 let listener = NSXPCListener(machServiceName: HaetaeXPC.machServiceName)
 listener.delegate = delegate
 listener.resume()

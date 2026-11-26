@@ -12,8 +12,11 @@ public struct CollectResult: Codable, Sendable, Equatable {
     public var scanGap: TimeInterval?
     /// 응답 한도 때문에 이번에 보내지 못한 건수. 0이 아니면 앱이 "N건은 표시하지 못함"을 보여 준다.
     public var droppedFindings: Int?
+    /// 알림을 마쳤고 아직 해결되지 않은 건의 요약 전부(Q53·Q64). 앱은 이것으로 패널을 다시 만든다 — 패널 파일은 사용자 소유라
+    /// 같은 사용자 권한으로 지울 수 있다. nil이면 이번에는 보내지 않은 것이다(응답 한도) — 앱은 가진 것을 그대로 둔다.
+    public var notified: [NotifiedSummary]?
 
-    public init(findings: [Finding], resolved: [String], failedChecks: [String], patternVersion: Int, daemonBuild: Int, scanGap: TimeInterval? = nil, droppedFindings: Int? = nil) {
+    public init(findings: [Finding], resolved: [String], failedChecks: [String], patternVersion: Int, daemonBuild: Int, scanGap: TimeInterval? = nil, droppedFindings: Int? = nil, notified: [NotifiedSummary]? = nil) {
         self.schemaVersion = Self.currentSchemaVersion
         self.findings = findings
         self.resolved = resolved
@@ -22,6 +25,24 @@ public struct CollectResult: Codable, Sendable, Equatable {
         self.daemonBuild = daemonBuild
         self.scanGap = scanGap
         self.droppedFindings = droppedFindings
+        self.notified = notified
+    }
+}
+
+/// 알림 완료 건의 요약. evidence는 뺀다 — 2,000건을 통째로 보내면 응답 한도를 넘는다(Q53).
+public struct NotifiedSummary: Codable, Sendable, Equatable {
+    public var fingerprint: String
+    public var checkID: String
+    public var title: String
+    public var ruleLevel: RiskLevel
+    public var observedAt: Date
+
+    public init(_ finding: Finding) {
+        fingerprint = finding.fingerprint
+        checkID = finding.checkID
+        title = finding.title
+        ruleLevel = finding.ruleLevel
+        observedAt = finding.observedAt
     }
 }
 
@@ -82,5 +103,16 @@ extension CollectResult {
         guard perCheck.values.allSatisfy({ $0 <= HaetaeLimits.maxFindingsPerCheck }) else { throw .invalidField("findings") }
         guard resolved.allSatisfy(Finding.isFingerprint) else { throw .invalidField("resolved") }
         guard failedChecks.allSatisfy(Finding.isCheckID) else { throw .invalidField("failedChecks") }
+        if let notified {
+            guard notified.count <= HaetaeLimits.maxNotifiedSummaries else { throw .invalidField("notified") }
+            var seenNotified = Set<String>()
+            for summary in notified {
+                guard Finding.isCheckID(summary.checkID),
+                      summary.title.unicodeScalars.count <= HaetaeLimits.maxTitleChars,
+                      Self.observedAtRange.contains(summary.observedAt.timeIntervalSince1970),
+                      Finding.isFingerprint(summary.fingerprint), seenNotified.insert(summary.fingerprint).inserted
+                else { throw .invalidField("notified") }
+            }
+        }
     }
 }

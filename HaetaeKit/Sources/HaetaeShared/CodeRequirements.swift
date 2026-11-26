@@ -11,6 +11,7 @@ public enum CodeRequirements {
     public enum InputError: Error, Equatable {
         case invalidTeamID
         case invalidMinBuild
+        case invalidBuild
     }
 
     public static let appIdentifier = "com.10000DOO.Haetae"
@@ -42,11 +43,12 @@ public enum CodeRequirements {
         return unsafe SecRequirementCreateWithString(requirement as CFString, [], &compiled)
     }
 
-    /// Info.plist에서 읽은 팀 ID·최소 빌드가 서명된 값과 같은지 실행 중인 자기 서명에 대조한다.
+    /// Info.plist에서 읽은 팀 ID·최소 빌드·빌드가 서명된 값과 같은지 실행 중인 자기 서명에 대조한다.
     /// 읽은 뒤 파일을 되돌려 놓는 바꿔치기도 여기서 걸린다(읽은 값 = 서명된 값). 번들 변조 탐지는 D20 자기 무결성 검사가 맡는다.
-    public static func selfSignatureStatus(teamID: String, minBuild: Int) throws(InputError) -> OSStatus {
+    public static func selfSignatureStatus(teamID: String, minBuild: Int, build: Int) throws(InputError) -> OSStatus {
         guard minBuild >= 0 else { throw .invalidMinBuild }
-        let text = try team(teamID: teamID) + #" and info[HaetaeMinBuild] = "\#(minBuild)""#
+        guard build >= 0 else { throw .invalidBuild }
+        let text = try team(teamID: teamID) + #" and info[HaetaeMinBuild] = "\#(minBuild)" and info[CFBundleVersion] = "\#(build)""#
         var me: SecCode?
         var requirement: SecRequirement?
         var status = unsafe SecCodeCopySelf([], &me)

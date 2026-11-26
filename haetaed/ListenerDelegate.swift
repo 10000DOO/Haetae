@@ -1,74 +1,35 @@
 import Foundation
+import HaetaeChecks
 import HaetaeShared
 import os
-import Security
 import Synchronization
 
-enum Log {
-    static let listener = Logger(subsystem: CodeRequirements.daemonIdentifier, category: "listener")
-    static let service = Logger(subsystem: CodeRequirements.daemonIdentifier, category: "service")
+/// `CollectService`가 보는 데몬 수명 쪽. 작업을 세고 새 빌드를 확인한다.
+protocol DaemonLifecycle: Sendable {
+    /// `Task`를 띄우기 **전에** 동기로 부른다 — 끊김과 경쟁하지 않게(D15, Q36).
+    func beginWork()
+    func endWork()
+    /// 디스크의 자기 번들 빌드가 더 높은지 보고, 높으면 진행 중인 작업이 끝난 뒤 종료하도록 표시한다(D20, Q30). 작업이 없으면
+    /// 처음 알았을 때 종료 확인을 건다 — 부르는 쪽은 작업으로 세지 않는다.
+    func checkForNewBuild() -> Bool
 }
 
-/// 데몬 시작 때 한 번 만든다. `appRequirement`가 nil이면 모든 연결을 거부한다(fail-closed).
-struct DaemonConfiguration: Sendable {
-    let appRequirement: String?
-    let build: Int
-
-    static func load() -> DaemonConfiguration {
-        let info = Bundle.main.infoDictionary ?? [:]
-        // 실행 파일에 내장된 __info_plist(서명에 묶여 있음)여야 한다. 내장 plist가 없으면 CFBundle이 Haetae.app의
-        // Contents/Info.plist를 대신 돌려주므로, 식별자로 자기 것인지 확인한다.
-        guard info["CFBundleIdentifier"] as? String == CodeRequirements.daemonIdentifier,
-              let build = (info["CFBundleVersion"] as? String).flatMap(Int.init), build >= 0,
-              let teamID = info["HaetaeTeamID"] as? String,
-              let minBuild = (info["HaetaeMinBuild"] as? String).flatMap(Int.init) else {
-            Log.listener.fault("내장 Info.plist를 읽지 못함 — 모든 연결 거부")
-            return DaemonConfiguration(appRequirement: nil, build: 0)
-        }
-        #if DEBUG
-        let variant = CodeRequirements.Variant.debug
-        #else
-        let variant = CodeRequirements.Variant.release
-        #endif
-        do {
-            let requirement = try CodeRequirements.app(teamID: teamID, minBuild: minBuild, variant: variant)
-            let compileStatus = CodeRequirements.compileStatus(requirement)
-            guard compileStatus == errSecSuccess else {
-                Log.listener.fault("앱 요구사항 컴파일 실패 (\(compileStatus)) — 모든 연결 거부")
-                return DaemonConfiguration(appRequirement: nil, build: build)
-            }
-            let selfStatus = try CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: minBuild)
-            guard selfStatus == errSecSuccess else {
-                Log.listener.fault("자기 서명이 HaetaeTeamID·HaetaeMinBuild와 맞지 않음 (\(selfStatus)) — 모든 연결 거부")
-                return DaemonConfiguration(appRequirement: nil, build: build)
-            }
-            return DaemonConfiguration(appRequirement: requirement, build: build)
-        } catch {
-            Log.listener.fault("앱 요구사항 생성 실패 (\(String(describing: error), privacy: .public)) — 모든 연결 거부")
-            return DaemonConfiguration(appRequirement: nil, build: build)
-        }
-    }
-}
-
-final class ListenerDelegate: NSObject, NSXPCListenerDelegate, Sendable {
-    /// 마지막 연결이 끊긴 뒤 종료하기 전에 기다리는 시간(D15).
+/// 연결을 받고 데몬 수명을 맡는다. 언제 끝낼지의 판단은 `DaemonLifecycleState`에 있고 여기서는 타이머와 `exit`만 한다.
+final class ListenerDelegate: NSObject, NSXPCListenerDelegate, DaemonLifecycle, Sendable {
     private static let idleGrace: DispatchTimeInterval = .seconds(5)
-
-    private struct State {
-        var connections = 0
-        var invalidAttempts = 0
-        /// 연결이 들어오거나 종료 확인을 새로 걸 때마다 올린다. 그 전에 건 확인은 무효가 된다.
-        var idleGeneration = 0
-    }
+    /// 새 빌드 때문에 끝낼 때 기다리는 시간. 방금 보낸 응답이 연결에서 나갈 틈을 준다.
+    private static let newBuildGrace: DispatchTimeInterval = .seconds(1)
 
     private let configuration: DaemonConfiguration
-    private let state = Mutex(State())
+    private let coordinator: CollectCoordinator
+    private let state = Mutex(DaemonLifecycleState())
 
-    init(configuration: DaemonConfiguration) {
+    init(configuration: DaemonConfiguration, coordinator: CollectCoordinator) {
         self.configuration = configuration
+        self.coordinator = coordinator
         super.init()
-        // 연결이 거부되기만 하면 연결 수가 0에서 움직이지 않는다. 시작할 때도 한 번 걸어 둔다.
-        scheduleIdleCheck()
+        // 연결이 거부되기만 하면 작업이 생기지 않는다. 시작할 때도 한 번 걸어 둔다.
+        scheduleExitCheck(.idle)
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
@@ -79,46 +40,75 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate, Sendable {
         // 메시지마다 다시 검사되므로 연결 도중 상대가 바뀌어도 끊긴다(3-7). resume 전에 걸어야 한다.
         newConnection.setCodeSigningRequirement(requirement)
 
-        let service = CollectService(callerUID: newConnection.effectiveUserIdentifier, build: configuration.build)
+        let uid = newConnection.effectiveUserIdentifier
+        let service = CollectService(callerUID: uid, coordinator: coordinator, lifecycle: self)
         newConnection.exportedInterface = NSXPCInterface(with: (any HaetaeXPCProtocol).self)
         newConnection.exportedObject = service
         newConnection.invalidationHandler = { [self] in
-            connectionClosed(hadValidCall: service.hadValidCall)
+            // 디스크에 새 빌드가 있으면 업데이트 때문에 끊긴 것이다 — 비정상 종료도 검증 실패도 세지 않고 작업으로도 세지 않는다
+            // (`DaemonLifecycleState.connectionClosedDuringUpdate`). 남은 묶음은 종료 직전 `prepareForExit`가 적는다.
+            if isNewBuildOnDisk() {
+                if let wait = state.withLock({ $0.connectionClosedDuringUpdate() }) { scheduleExitCheck(wait) }
+                return
+            }
+            let closed = service.closeState
+            beginWork()
+            Task {
+                await coordinator.connectionClosed(callerUID: uid, userQuit: closed.userQuit, hadValidCall: closed.hadValidCall)
+                state.withLock { $0.connectionClosed() }
+                endWork()
+            }
         }
 
         // resume 뒤에 올리면 바로 무효화된 연결이 먼저 줄여서 수가 어긋난다.
-        state.withLock {
-            $0.connections += 1
-            $0.idleGeneration &+= 1
-        }
+        state.withLock { $0.connectionOpened() }
         newConnection.resume()
         return true
     }
 
-    private func connectionClosed(hadValidCall: Bool) {
-        let (remaining, invalidAttempts) = state.withLock { state in
-            state.connections -= 1
-            if !hadValidCall { state.invalidAttempts += 1 }
-            return (state.connections, state.invalidAttempts)
-        }
-        // 서명 요구사항에 걸린 상대는 메시지가 하나도 닿지 않고 끊긴다. 누구나 반복할 수 있으니
-        // 1, 2, 4, 8…번째만 남겨 로그가 불어나지 않게 한다.
-        if !hadValidCall, invalidAttempts.nonzeroBitCount == 1 {
-            Log.listener.error("유효한 호출 없이 끊긴 연결 (누적 \(invalidAttempts))")
-        }
-        if remaining == 0 { scheduleIdleCheck() }
+    func beginWork() {
+        state.withLock { $0.beginWork() }
     }
 
-    private func scheduleIdleCheck() {
-        let generation = state.withLock {
-            $0.idleGeneration &+= 1
-            return $0.idleGeneration
-        }
-        DispatchQueue.global().asyncAfter(deadline: .now() + Self.idleGrace) { [self] in
-            if state.withLock({ $0.connections == 0 && $0.idleGeneration == generation }) {
-                Log.listener.info("연결 0개 — 종료")
-                exit(0)
+    func endWork() {
+        if let wait = state.withLock({ $0.endWork() }) { scheduleExitCheck(wait) }
+    }
+
+    func checkForNewBuild() -> Bool {
+        guard isNewBuildOnDisk() else { return false }
+        let (first, wait) = state.withLock { state in (!state.newBuildPending, state.noticeNewBuild()) }
+        if first { Log.listener.notice("디스크에 새 빌드 — 진행 중인 작업이 끝나면 종료") }
+        if let wait { scheduleExitCheck(wait) }
+        return true
+    }
+
+    /// 한 번 알면 디스크를 다시 보지 않는다(서명 확인을 끊긴 연결마다 하지 않게).
+    private func isNewBuildOnDisk() -> Bool {
+        state.withLock { $0.newBuildPending } || configuration.hasNewerBuildOnDisk()
+    }
+
+    /// 지연 뒤에 조건을 보고, 묶어 둔 기록을 적은 뒤 한 번 더 본다 — 기록하는 동안 연결이나 작업이 들어오면 끝내지 않는다.
+    private func scheduleExitCheck(_ wait: DaemonLifecycleState.Wait) {
+        let ticket = state.withLock { $0.armExitCheck() }
+        let delay = wait == .newBuild ? Self.newBuildGrace : Self.idleGrace
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            guard state.withLock({ $0.shouldExit(ticket) }) else { return }
+            Task {
+                await coordinator.prepareForExit()
+                guard state.withLock({ $0.shouldExit(ticket) }) else { return }
+                Log.listener.info("종료 (연결 0개이거나 새 빌드)")
+                DaemonExit.now()
             }
         }
+    }
+}
+
+/// 종료는 여기로만 한다. SIGTERM 처리와 예약된 종료가 겹쳐도 `exit`를 한 번만 부른다(동시에 부르는 `exit`는 정해진 동작이 아니다).
+enum DaemonExit {
+    private static let started = Atomic(false)
+
+    static func now() {
+        guard !started.exchange(true, ordering: .relaxed) else { return }
+        exit(0)
     }
 }

@@ -37,7 +37,9 @@ public actor CommandRunner {
     private static let drainGrace: Duration = .seconds(2)
 
     private var isBusy = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// 차례를 기다리는 호출(온 순서). 기다리는 동안 취소되면 줄에서 빠진다(`cancelWaiter`).
+    private var waiters: [(id: UInt64, continuation: CheckedContinuation<Void, any Error>)] = []
+    private var nextWaiterID: UInt64 = 0
     private let selfExecutable: (path: String, requirement: LaunchCodeRequirement)?
 
     /// - Parameter selfExecutable: 해석 서비스가 해석 자식으로 띄울 자기 자신(WO-49). 이 경로 하나만 시스템 볼륨 밖이어도 되고,
@@ -54,7 +56,8 @@ public actor CommandRunner {
     ///     손자를 남기지 않는 명령에만 쓴다 — 그룹을 빠져나간 손자가 stdin을 쥐고 읽지 않으면 쓰기 스레드가 남는다.
     ///   - timeout: 넘으면 SIGTERM, 2초 뒤 SIGKILL. 돌아오기까지는 최대 `timeout` + 6초가 걸린다.
     ///   - maxBytes: `stdout`·`stderr` 각각의 상한.
-    /// - Throws: 취소되면 `CancellationError`. 앞선 명령을 기다리는 동안에는 차례가 와야 취소를 본다.
+    /// - Throws: 취소되면 `CancellationError`. 앞선 명령을 기다리는 동안 취소돼도 바로 줄에서 빠져 돌아온다 — 앞 명령이 길어도
+    ///   호출한 쪽의 시간 상한(사용자 조회 5초 등)이 지켜지게(WO-12 ③).
     ///   서명 요구사항에 맞지 않으면 throw하지 않고, 커널이 exec 때 SIGKILL한 종료 상태로 돌아온다.
     public func run(_ executable: String, _ args: [String], stdin: Data? = nil, timeout: Duration, maxBytes: Int) async throws -> CommandOutput {
         // NUL이 있으면 Foundation이 ObjC 예외를 던진다. Swift에서 잡을 수 없어 데몬이 죽으므로 지우면 안 된다.
@@ -75,17 +78,36 @@ public actor CommandRunner {
         }
         precondition(maxBytes >= 0, "maxBytes는 0 이상")
 
-        // actor는 await 사이에 다른 호출을 받으므로, 한 번에 하나만 돌리려면 차례를 직접 세운다.
-        if isBusy {
-            await withCheckedContinuation { waiters.append($0) }
-        } else {
-            isBusy = true
-        }
-        defer {
-            if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().resume() }
-        }
+        try await acquire()
+        defer { release() }
         try Task.checkCancellation()
         return try await Self.execute(executable, args, stdin: stdin, requirement: requirement, timeout: timeout, maxBytes: maxBytes)
+    }
+
+    /// actor는 await 사이에 다른 호출을 받으므로, 한 번에 하나만 돌리려면 차례를 직접 세운다. 취소되면 차례를 얻지 않고 던진다.
+    private func acquire() async throws {
+        guard isBusy else {
+            isBusy = true
+            return
+        }
+        let id = nextWaiterID
+        nextWaiterID &+= 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { waiters.append((id, $0)) }
+        } onCancel: {
+            // 처리기는 actor 밖에서 바로 돈다. 줄에 넣기 전에 불려도 이 Task는 넣은 뒤에 돈다(actor가 넣는 쪽을 먼저 끝낸다).
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    private func release() {
+        if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().continuation.resume() }
+    }
+
+    /// 이미 차례를 받았으면 아무 일도 하지 않는다 — 받은 쪽이 `checkCancellation`에서 던지고 `release`한다.
+    private func cancelWaiter(_ id: UInt64) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 
     private enum Event { case exited, eof, timeout, killDeadline, abandon, drainDeadline }

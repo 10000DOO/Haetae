@@ -79,7 +79,7 @@ struct CodeRequirementsTests {
             }
         }
         #expect(throws: CodeRequirements.InputError.invalidTeamID) { try CodeRequirements.team(teamID: badTeamID) }
-        #expect(throws: CodeRequirements.InputError.invalidTeamID) { try CodeRequirements.selfSignatureStatus(teamID: badTeamID, minBuild: minBuild) }
+        #expect(throws: CodeRequirements.InputError.invalidTeamID) { try CodeRequirements.selfSignatureStatus(teamID: badTeamID, minBuild: minBuild, build: minBuild) }
     }
 
     @Test("음수 minBuild는 거부한다", arguments: [-1, Int.min])
@@ -91,7 +91,7 @@ struct CodeRequirementsTests {
                 }
             }
         }
-        #expect(throws: CodeRequirements.InputError.invalidMinBuild) { try CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: badBuild) }
+        #expect(throws: CodeRequirements.InputError.invalidMinBuild) { try CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: badBuild, build: minBuild) }
     }
 
     @Test("compileStatus는 문법이 틀린 문자열에 실패를 돌려준다", arguments: [

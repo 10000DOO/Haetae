@@ -17,15 +17,11 @@ let variant = CodeRequirements.Variant.debug
 let variant = CodeRequirements.Variant.release
 #endif
 
-// 실행 파일에 내장된 Info.plist(서명에 묶여 있음)의 값으로 데몬 요구사항을 만들고, 그 값이 자기 서명과 맞는지 본다(데몬과 같은 방식).
+// 실행 파일에 내장된 Info.plist(서명에 묶여 있음)의 값이 자기 서명과 맞는지 보고, 그 값으로 데몬 요구사항을 만든다(데몬과 같은 방식).
 // 하나라도 어긋나면 서비스를 열지 않는다 — 요구사항 없이 열면 아무 프로세스나 붙는다.
-let info = Bundle.main.infoDictionary ?? [:]
-guard info["CFBundleIdentifier"] as? String == CodeRequirements.parserIdentifier,
-      let teamID = info["HaetaeTeamID"] as? String,
-      let minBuild = (info["HaetaeMinBuild"] as? String).flatMap(Int.init),
-      let requirement = try? CodeRequirements.daemon(teamID: teamID, minBuild: minBuild, variant: variant),
-      CodeRequirements.compileStatus(requirement) == errSecSuccess,
-      (try? CodeRequirements.selfSignatureStatus(teamID: teamID, minBuild: minBuild)) == errSecSuccess
+guard let identity = try? SelfIdentity.load(identifier: CodeRequirements.parserIdentifier),
+      let requirement = try? CodeRequirements.daemon(teamID: identity.teamID, minBuild: identity.minBuild, variant: variant),
+      CodeRequirements.compileStatus(requirement) == errSecSuccess
 else {
     log.fault("자기 신원 확인 실패 — 서비스를 열지 않음")
     exit(78)

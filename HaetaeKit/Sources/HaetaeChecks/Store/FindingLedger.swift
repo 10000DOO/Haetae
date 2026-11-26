@@ -10,9 +10,15 @@ public enum LedgerEvent: Codable, Sendable, Equatable {
     /// pending이 상한을 넘어 버린 건수(Q52).
     case pendingDropped(count: Int)
     case userQuit
-    case abnormalTermination
-    case verificationFailedConnection
+    /// 유효한 호출이 있던 연결이 `markUserQuit` 없이 끊긴 수(D28). 앱을 띄웠다 죽이기를 되풀이할 수 있어 묶어서 적는다(Q66과 같은 방식).
+    case abnormalTermination(count: Int)
+    /// 유효한 호출 없이 끊긴 연결의 수. 누구나 반복할 수 있어 묶어서 적는다(Q66 — 1분에 한 줄).
+    case verificationFailedConnection(count: Int)
     case settingWeakened(String)
+    /// 시작할 때 자기 번들 검사가 실패했다(D20).
+    case selfIntegrityFailed(String)
+    /// 실행 중인 빌드가 본 적 있는 가장 높은 빌드보다 낮다 — 모든 요청을 거부한다(D20).
+    case rolledBack(running: Int, highest: Int)
 }
 
 /// 데몬이 가진 탐지 원장(D12·D18·D24). 사용자별로 pending(ack 전)과 알림 완료(ack 후)를 나눠 둔다.
@@ -27,7 +33,7 @@ public actor FindingLedger {
     /// 응답 하나에 보낼 수 있는 만큼(Q52). ack를 막고 탐지를 쏟아내도 원장이 다시 읽지 못할 만큼 커지지 않게.
     static let maxPendingPerUser = HaetaeLimits.maxFindingsPerReply
     /// 넘치면 가장 오래 전에 ack한 것부터 지운다 — 아직 있으면 다시 알릴 뿐 숨지는 않는다.
-    static let maxNotifiedPerUser = 2_000
+    static let maxNotifiedPerUser = HaetaeLimits.maxNotifiedSummaries
     /// 기록 파일 하나의 상한. 넘으면 `events.jsonl.1`로 넘긴다(두 파일 합쳐 64MB).
     static let maxEventFileBytes = 32_000_000
 
@@ -44,6 +50,10 @@ public actor FindingLedger {
         /// 최근 결과(오래된 것부터, `true`가 실패, `failureWindow`개까지). 뒤에 더한 필드라 옛 `state.json`에는 없다
         /// (Optional이 아니면 디코딩이 실패해 원장을 통째로 비운다).
         var recentFailures: [String: [Bool]]?
+        /// 앱이 마지막으로 결과를 받았다고 알린(ack) 시각과, 그 뒤로 검사 공백을 알릴 일이 있었는지(Q31·Q67). 데몬이 다시 떠도
+        /// 알려야 해서 디스크에 둔다.
+        var lastDelivered: Date?
+        var scanGapPending: Bool?
     }
 
     private struct State: Codable {
@@ -147,6 +157,8 @@ public actor FindingLedger {
     }
 
     /// pending에 있던 지문만 알림 완료로 바꾼다 — 앱이 아무 지문이나 ack해 앞으로의 탐지를 미리 숨기지 못하게.
+    /// ack는 앱이 `collect` 결과를 받았다는 뜻이기도 하다(앱은 탐지가 0건이어도 `collect`마다 ack한다 — Q67). 그래서 검사 공백 표시를
+    /// 여기서 지우고 공백의 시작점을 지금으로 옮긴다. 응답을 만들 때 지우면, 앱이 받기 직전마다 앱을 죽여 공백을 짧게 보이게 할 수 있다.
     /// - Returns: 실제로 알림 완료가 된 지문.
     @discardableResult
     public func acknowledge(_ fingerprints: [String], uid: uid_t) -> [String] {
@@ -162,6 +174,8 @@ public actor FindingLedger {
             let oldest = user.notified.sorted { $0.value.at < $1.value.at }.prefix(user.notified.count - Self.maxNotifiedPerUser)
             for (fingerprint, _) in oldest { user.notified[fingerprint] = nil }
         }
+        user.lastDelivered = at
+        user.scanGapPending = nil
         state.users[Self.key(uid)] = user
         save()
         if !acknowledged.isEmpty { record([.acknowledged(count: acknowledged.count)], uid: uid) }
@@ -284,6 +298,27 @@ public actor FindingLedger {
         guard changed else { return }
         state.users[Self.key(uid)]?.recentFailures = all
         save()
+    }
+
+    /// 검사 공백을 알릴 일이 생겼다(Q31 — 비정상 종료, WO-40의 정지 의심). 언제 부를지는 `CollectCoordinator`가 정한다.
+    public func markScanGap(uid: uid_t) {
+        // 이미 표시돼 있으면 쓰지 않는다 — 끊김을 되풀이해 `state.json` 전체를 계속 다시 쓰게 하지 못하게.
+        guard state.users[Self.key(uid)]?.scanGapPending != true else { return }
+        var user = state.users[Self.key(uid), default: UserLedger()]
+        user.scanGapPending = true
+        // 앱이 아직 한 번도 받았다고 알리지 않았으면 지금을 시작점으로 둔다 — 설치 직후부터 첫 ack 전에 앱을 계속 죽이면 공백을 재지
+        // 못한 채 첫 ack에 지워진다(Q67 확인 Low).
+        if user.lastDelivered == nil { user.lastDelivered = now() }
+        state.users[Self.key(uid)] = user
+        save()
+    }
+
+    /// 알릴 일이 있었으면 앱이 마지막으로 결과를 받은 때부터 지금까지(검사 공백). 표시는 지우지 않는다 — 앱이 받았다고 알릴 때
+    /// (`acknowledge`) 지운다(Q67).
+    public func scanGap(uid: uid_t) -> TimeInterval? {
+        guard let user = state.users[Self.key(uid)], user.scanGapPending == true else { return nil }
+        let at = now()
+        return user.lastDelivered.map { max(0, at.timeIntervalSince($0)) }
     }
 
     /// 다시 읽지 못할 크기면 쓰지 않는다 — 써지기는 하는데 다음 시작 때 읽지 못하는 상태를 만들지 않게.

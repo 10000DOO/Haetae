@@ -22,6 +22,10 @@ public struct IsolatedParser: Sendable {
     private let serviceRequirement: String
     private let options: NSXPCConnection.Options
 
+    /// 해석 서비스 요구사항을 만들지 못했을 때 데몬이 쓴다. 모든 `parse`가 `unavailable`을 던져, 해석이 필요한 검사는 검사 실패
+    /// 1건으로 드러난다(WO-12) — 요구사항 없이 연결하면 아무 프로세스나 답할 수 있다.
+    public static let unavailable = IsolatedParser(serviceRequirement: "")
+
     /// - Parameter serviceRequirement: `CodeRequirements.parser(…)`로 만든 문자열.
     public init(serviceRequirement: String) {
         self.init(serviceRequirement: serviceRequirement, options: .privileged)

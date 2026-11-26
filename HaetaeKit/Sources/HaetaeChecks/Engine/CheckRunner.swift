@@ -494,11 +494,11 @@ public actor CheckRunner {
         return String(String.UnicodeScalarView(masked.unicodeScalars.prefix(limit - tail.unicodeScalars.count))) + tail
     }
 
-    /// 검사별로 수준 높은 것부터 상한까지만 남긴다. 잘라낸 건수를 함께 돌려준다.
+    /// 검사별로 `Finding.deliveryOrder` 순서로 상한까지만 남긴다. 잘라낸 건수를 함께 돌려준다.
     static func capPerCheck(_ findings: [Finding]) -> (kept: [Finding], cut: Int) {
         var kept: [Finding] = []
         for group in Dictionary(grouping: findings, by: \.checkID).values {
-            kept += group.sorted { $0.ruleLevel.rank > $1.ruleLevel.rank }.prefix(HaetaeLimits.maxFindingsPerCheck)
+            kept += group.sorted(by: Finding.deliveryOrder).prefix(HaetaeLimits.maxFindingsPerCheck)
         }
         return (kept, findings.count - kept.count)
     }
@@ -542,6 +542,17 @@ extension RiskLevel {
         case .medium: 1
         case .high: 2
         }
+    }
+}
+
+extension Finding {
+    /// 보낼 것을 자를 때의 순서(검사별 상한, 응답 한도): 수준이 높은 것 → 먼저 잡힌 것(`observedAt`은 원장이 처음 본 시각으로 지킨다)
+    /// → 지문. pending을 버릴 때(Q52)와 같은 원칙이다 — 뒤에 쏟아낸 건이 먼저 잡힌 탐지를 계속 밀어내지 못하게.
+    /// 사전 순서에 맡기면 실행마다 순서가 달라져 진짜 탐지가 여러 번 연달아 밀린다(WO-12 리뷰 실측).
+    static func deliveryOrder(_ a: Finding, _ b: Finding) -> Bool {
+        if a.ruleLevel != b.ruleLevel { return a.ruleLevel.rank > b.ruleLevel.rank }
+        if a.observedAt != b.observedAt { return a.observedAt < b.observedAt }
+        return a.fingerprint < b.fingerprint
     }
 }
 

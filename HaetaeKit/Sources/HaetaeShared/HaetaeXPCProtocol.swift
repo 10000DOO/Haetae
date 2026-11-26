@@ -39,6 +39,8 @@ public enum HaetaeXPCError: Int, CustomNSError, Sendable {
     case rateLimited
     case rolledBack
     case internalError
+    /// 디스크에 더 새 빌드가 있어 이 데몬은 곧 끝난다. 앱은 연결을 놓고 다시 시도한다(D20).
+    case updating
 
     // 기본 브리징(`as NSError`)은 타입 이름을 도메인으로 쓴다. 어느 쪽으로 만들어도 같은 도메인이 되게 맞춘다.
     public static var errorDomain: String { HaetaeXPC.errorDomain }
