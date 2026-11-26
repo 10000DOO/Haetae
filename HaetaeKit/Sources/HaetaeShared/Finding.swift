@@ -26,7 +26,7 @@ public struct Finding: Codable, Sendable, Hashable {
         value.utf8.count == 64 && value.utf8.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
     }
 
-    static func isCheckID(_ value: String) -> Bool {
+    package static func isCheckID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= HaetaeLimits.maxCheckIDChars
             && value.utf8.allSatisfy { (0x61...0x7A).contains($0) || (0x30...0x39).contains($0) || $0 == 0x2E || $0 == 0x2D }
     }

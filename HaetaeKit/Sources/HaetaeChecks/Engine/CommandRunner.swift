@@ -154,7 +154,7 @@ public actor CommandRunner {
         await withDiscardingTaskGroup { group in
             group.addTask {
                 for (delay, event) in [(timeout, Event.timeout), (killGrace, .killDeadline), (killGrace, .abandon)] {
-                    do { try await Task.sleep(for: delay) } catch { return }
+                    do { try await Task.sleep(for: delay, clock: .suspending) } catch { return }
                     sink.yield(event)
                 }
             }
@@ -164,7 +164,7 @@ public actor CommandRunner {
                     exited = true
                     // 손자 프로세스가 파이프를 쥐고 있으면 EOF가 오지 않으므로 기한을 둔다.
                     group.addTask {
-                        do { try await Task.sleep(for: drainGrace) } catch { return }
+                        do { try await Task.sleep(for: drainGrace, clock: .suspending) } catch { return }
                         sink.yield(.drainDeadline)
                     }
                 case .eof:

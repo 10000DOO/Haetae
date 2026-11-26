@@ -11,4 +11,7 @@ public enum HaetaeLimits {
     /// 지문 1개 = 64자 + 따옴표·쉼표. 여유를 둔 값.
     public static let maxAckBytes = 100_000
     public static let maxPatternPackBytes = 2_000_000
+    /// 검사 한 바퀴(`CheckRunner.runAll`)의 상한. 넘으면 남은 검사는 타임아웃 실패가 된다. 앱의 `collect` 대기는 이것보다 길어야 한다.
+    /// shortcut: 검사가 아직 없어 재지 못한 임시 값이다, 검사가 들어온 뒤(WO-18) 실측으로 다시 정한다.
+    public static let maxRunDuration: Duration = .seconds(25)
 }

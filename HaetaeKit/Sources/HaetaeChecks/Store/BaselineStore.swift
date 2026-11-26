@@ -58,6 +58,26 @@ public struct BaselineStore: Sendable {
         }
     }
 
+    /// 확정하면 안 되는 pending을 치운다(`<checkID>.json.pending` → `.json.stale`) — pending에서 버린 탐지의 항목이 들어 있어
+    /// 뒤에 ack로 확정되면 정상으로 굳는다. 지우는 API가 없어 이름을 바꾼다. 없으면 아무 일도 하지 않는다.
+    public func discardPending(checkID: String, uid: uid_t) throws {
+        do {
+            try directory.rename(Self.pendingName(checkID), to: "\(checkID).json.stale", in: Self.folder(uid))
+        } catch SecureDirectoryError.system(ENOENT) {
+            return
+        }
+    }
+
+    /// 깨진 기준값을 옆으로 옮긴다(`<checkID>.json.bad`) — 사람이 root 파일을 지우지 않아도 그 검사가 다시 학습하게.
+    /// 옮긴 파일은 무엇이 깨졌는지 볼 수 있게 남긴다. 없으면 아무 일도 하지 않는다.
+    public func quarantine(checkID: String, uid: uid_t) throws {
+        do {
+            try directory.rename(Self.name(checkID), to: "\(checkID).json.bad", in: Self.folder(uid))
+        } catch SecureDirectoryError.system(ENOENT) {
+            return
+        }
+    }
+
     private static func folder(_ uid: uid_t) -> [String] { ["baseline", String(uid)] }
     private static func name(_ checkID: String) -> String { "\(checkID).json" }
     /// `.json`으로 끝나지 않게 해 어떤 checkID의 본 파일과도 이름이 겹치지 않는다.

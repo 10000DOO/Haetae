@@ -41,6 +41,9 @@ public actor FindingLedger {
         var pending: [String: Finding] = [:]
         var notified: [String: Notified] = [:]
         var lastSuccess: [String: Date] = [:]
+        /// 최근 결과(오래된 것부터, `true`가 실패, `failureWindow`개까지). 뒤에 더한 필드라 옛 `state.json`에는 없다
+        /// (Optional이 아니면 디코딩이 실패해 원장을 통째로 비운다).
+        var recentFailures: [String: [Bool]]?
     }
 
     private struct State: Codable {
@@ -95,8 +98,11 @@ public actor FindingLedger {
 
     /// 이번 검사 결과에서 보낼 것을 고른다: 알림을 마친 지문은 빼고, 새 건은 pending에 넣는다.
     /// ack 전의 pending은 이번에 보이지 않아도 다시 보낸다(D24) — 응답 직후 앱을 죽이고 흔적을 지우는 공격을 막는다.
-    /// - Returns: 보낼 것과, pending 상한 때문에 버린 건수. 0이 아니면 검사 쪽이 "기록 상한 초과" 높음 Finding을 낸다(Q52).
-    public func filterNew(_ findings: [Finding], uid: uid_t) -> (findings: [Finding], dropped: Int) {
+    /// - Parameter protecting: 상한을 넘어도 버리지 않을 checkID. "기록 상한 초과" 경고는 가장 새로운 높음이라, 지키지 않으면
+    ///   자기가 먼저 버려져 넘친 것을 알리지 못한다.
+    /// - Returns: 보낼 것, pending 상한 때문에 버린 건수, 버린 Finding의 checkID. 건수가 0이 아니면 검사 쪽이
+    ///   "기록 상한 초과" 높음 Finding을 내고(Q52), 그 검사들은 기준값 확정과 `lastSuccess`에서 뺀다(버린 탐지가 정상으로 굳지 않게).
+    public func filterNew(_ findings: [Finding], uid: uid_t, protecting: Set<String> = []) -> (findings: [Finding], dropped: Int, droppedChecks: Set<String>) {
         var user = state.users[Self.key(uid), default: UserLedger()]
         var events: [LedgerEvent] = []
         for var finding in findings where user.notified[finding.fingerprint] == nil {
@@ -108,21 +114,31 @@ public actor FindingLedger {
             }
             user.pending[finding.fingerprint] = finding
         }
-        let dropped = max(0, user.pending.count - Self.maxPendingPerUser)
-        if dropped > 0 {
+        var dropped = 0
+        var droppedChecks: Set<String> = []
+        let excess = user.pending.count - Self.maxPendingPerUser
+        if excess > 0 {
             // 낮은 수준부터, 같은 수준이면 새 것부터 버린다 — 먼저 잡힌 탐지를 뒤에 쏟아낸 건으로 밀어내지 못하게.
-            let order: [RiskLevel: Int] = [.low: 0, .medium: 1, .high: 2]
-            let victims = user.pending.values.sorted {
-                let left = order[$0.ruleLevel, default: 0], right = order[$1.ruleLevel, default: 0]
-                return left != right ? left < right : $0.observedAt > $1.observedAt
-            }.prefix(dropped)
-            for finding in victims { user.pending[finding.fingerprint] = nil }
+            let victims = user.pending.values.filter { !protecting.contains($0.checkID) }.sorted {
+                $0.ruleLevel != $1.ruleLevel ? $0.ruleLevel.rank < $1.ruleLevel.rank : $0.observedAt > $1.observedAt
+            }.prefix(excess)
+            for finding in victims {
+                user.pending[finding.fingerprint] = nil
+                droppedChecks.insert(finding.checkID)
+            }
+            dropped = victims.count
             events.append(.pendingDropped(count: dropped))
         }
         state.users[Self.key(uid)] = user
         save()
         record(events, uid: uid)
-        return (Array(user.pending.values), dropped)
+        return (Array(user.pending.values), dropped, droppedChecks)
+    }
+
+    /// 알림을 마친 지문. 검사별 상한 앞에서 거르는 데 쓴다(Finding을 복사하지 않게 지문만).
+    public func notifiedFingerprints(uid: uid_t) -> Set<String> {
+        guard let user = state.users[Self.key(uid)] else { return [] }
+        return Set(user.notified.keys)
     }
 
     /// 알림을 마쳤고 아직 해결되지 않은 건(Q53). 응답마다 함께 보내 앱이 패널을 다시 만들 수 있게 한다(WO-12·13).
@@ -157,6 +173,11 @@ public actor FindingLedger {
         state.users[Self.key(uid)]?.pending.values.contains { $0.checkID == checkID } ?? false
     }
 
+    /// ack되지 않은 Finding이 남은 checkID. ack 뒤 확정(`CheckRunner.confirmAfterAck`)이 한 번에 묻는다.
+    public func pendingCheckIDs(uid: uid_t) -> Set<String> {
+        Set(state.users[Self.key(uid)]?.pending.values.map(\.checkID) ?? [])
+    }
+
     /// 알림을 마쳤는데 이번에 성공한 검사에서 보이지 않은 지문. 기록에서 빼고 돌려준다(앱이 해결됨으로 표시).
     /// 실패한 검사의 지문은 건드리지 않는다 — 검사가 실패해 안 보인 것을 해결로 보면 안 된다(T12).
     public func resolved(current: Set<String>, succeededChecks: Set<String>, uid: uid_t) -> [String] {
@@ -188,10 +209,16 @@ public actor FindingLedger {
 
     /// `age`보다 오래된 알림 완료·pending과 기록 줄을 지운다(R11 — 30일). 지운 알림 완료 건이 아직 있으면 다시 알린다.
     /// 앱이 ack하지 않으면 pending이 끝없이 쌓이므로 오래된 pending도 지운다.
-    public func purge(olderThan age: TimeInterval) {
+    /// - Returns: 사용자마다 pending을 지운 checkID. 그 검사의 pending 기준값에는 알리지 못한 항목이 들어 있을 수 있어 부른 쪽이
+    ///   `BaselineStore.discardPending`으로 치운다(WO-12) — 안 치우면 뒤의 ack 확정으로 정상으로 굳는다.
+    @discardableResult
+    public func purge(olderThan age: TimeInterval) -> [uid_t: Set<String>] {
         let cutoff = now().addingTimeInterval(-age)
+        var purgedPending: [uid_t: Set<String>] = [:]
         for (key, var user) in state.users {
             user.notified = user.notified.filter { $0.value.at >= cutoff }
+            let expired = Set(user.pending.values.filter { $0.observedAt < cutoff }.map(\.checkID))
+            if !expired.isEmpty, let uid = uid_t(key) { purgedPending[uid] = expired }
             user.pending = user.pending.filter { $0.value.observedAt >= cutoff }
             state.users[key] = user
         }
@@ -210,6 +237,7 @@ public actor FindingLedger {
                 persistenceFailure = error as? SecureDirectoryError ?? .system(EIO)
             }
         }
+        return purgedPending
     }
 
     /// 마지막으로 성공한 검사 시각(Q50 — 사용자별). 로그 검사는 이 뒤만 본다.
@@ -223,6 +251,38 @@ public actor FindingLedger {
         for checkID in checkIDs {
             state.users[Self.key(uid), default: UserLedger()].lastSuccess[checkID] = date
         }
+        save()
+    }
+
+    /// 최근 몇 번의 결과로 실패 수준을 정하는지(Q58).
+    static let failureWindow = 5
+
+    /// 실패를 하나 남기고 최근 `failureWindow`번 중 실패 수를 돌려준다(Q58 — 연속 횟수로 세면 실패·실패·성공을 되풀이해
+    /// 높음을 영영 피할 수 있다). 디스크에 바로 둔다 — 메모리에만 두거나 실행 끝에 모아 두면 앱을 죽여 데몬을 내리는 것만으로
+    /// 횟수가 오르지 않는다(T12).
+    public func noteFailure(_ key: String, uid: uid_t) -> Int {
+        var user = state.users[Self.key(uid), default: UserLedger()]
+        var all = user.recentFailures ?? [:]
+        let history = Array((all[key, default: []] + [true]).suffix(Self.failureWindow))
+        all[key] = history
+        user.recentFailures = all
+        state.users[Self.key(uid)] = user
+        save()
+        return history.count(where: { $0 })
+    }
+
+    /// 성공을 남긴다. 최근 결과에 실패가 없어지면 기록을 지운다(실패한 적 없는 검사는 기록이 없다).
+    public func noteSuccesses(_ keys: some Sequence<String>, uid: uid_t) {
+        guard var all = state.users[Self.key(uid)]?.recentFailures else { return }
+        var changed = false
+        for key in keys {
+            guard let history = all[key] else { continue }
+            let next = Array((history + [false]).suffix(Self.failureWindow))
+            all[key] = next.contains(true) ? next : nil
+            changed = true
+        }
+        guard changed else { return }
+        state.users[Self.key(uid)]?.recentFailures = all
         save()
     }
 

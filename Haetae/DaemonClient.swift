@@ -30,8 +30,8 @@ private nonisolated final class Once<T: Sendable>: Sendable {
 /// 데몬 연결 하나를 쥐고 있는다. 앱이 연결을 쥐고 있는 동안 데몬이 떠 있다(D15).
 @MainActor
 final class DaemonClient {
-    /// shortcut: 모든 호출이 30초다. 검사 엔진이 붙으면 `collect`만 길게 잡는다(WO-11에서 값 결정).
-    private static let callTimeout: Duration = .seconds(30)
+    /// shortcut: 모든 호출이 검사 한 바퀴 상한 + 5초다, `collect`가 다른 사용자 실행을 기다리는 시간까지 잡을 때(WO-12) `collect`만 나눈다.
+    private static let callTimeout: Duration = HaetaeLimits.maxRunDuration + .seconds(5)
     private static let quitTimeout: Duration = .seconds(2)
     /// 무효화된 뒤 다시 시도하기 전에 기다리는 시간. 옛 데몬이 꺼지고 새 데몬이 뜰 시간을 준다(D20).
     private static let retryDelays: [Duration] = [.seconds(5), .seconds(15), .seconds(30)]
