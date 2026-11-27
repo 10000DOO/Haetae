@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-27 · 브랜치: `main` · 다음 액션: WO-15(검사)부터. WO-14 실제 화면 확인(7-2 R3·R5·R4·R6)은 새 빌드를 `/Applications`에 root 소유로 설치한 뒤(사용자, sudo). Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-27 · 브랜치: `main` · 다음 액션: WO-15(검사)부터. Debug 데모 검사(WO-54)는 실제 검사가 들어오면 지운다(지우기 전 절차는 WO-56으로 필요 없어짐). WO-53 화면은 새 빌드 설치 뒤 사용자가 7-2 R4로 본다. WO-14 실제 화면 확인(7-2 R3·R5·R4·R6)은 새 빌드를 `/Applications`에 root 소유로 설치한 뒤(사용자, sudo). Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -610,7 +610,7 @@ sequenceDiagram
 | Phase | 목적 | 포함 WO | 완료 판정 | 커밋 요약 (제목은 `type: 요약`) |
 |---|---|---|---|---|
 | 1 | 뼈대와 안전한 연결: 패키지, Xcode 번들 구성, 데몬·앱 뼈대, XPC 양방향 검증 | WO-1 ~ WO-7 | 7-1 P1 전부 통과 + 7-2 R12·R13·R14·R16 확인 | 앱·데몬 뼈대와 XPC 양방향 검증 |
-| 2 | 검사 엔진과 핵심 검사 4개, 규칙 판정, 알림·패널 | WO-8 ~ WO-19, WO-47·48(WO-10보다 먼저) | 7-1 P2 통과 + 7-2 R3·R4·R5·R6·R11·R18·R19 확인 | 검사 엔진, 핵심 검사, 알림 |
+| 2 | 검사 엔진과 핵심 검사 4개, 규칙 판정, 알림·패널 | WO-8 ~ WO-19, WO-47·48(WO-10보다 먼저), WO-53(WO-14 다음, Q78), WO-54·55·56(WO-53 다음, Q80·Q81·Q83) | 7-1 P2 통과 + 7-2 R3·R4·R5·R6·R11·R18·R19 확인 | 검사 엔진, 핵심 검사, 알림 |
 | 3 | LLM 판정: 모델 고정·검증·다운로드, 판정, 후보 실측 비교 | WO-20 ~ WO-25 | 7-1 P3 통과 + 7-2 R7·R10 확인 + D4 확정 | 로컬 LLM 판정 |
 | 4 | 나머지 "높음" 검사 9묶음과 사용자 세션 수집 | WO-26 ~ WO-35 | 7-1 P4 통과 + 7-2 R1(높음) 확인 | 높음 우선순위 검사 |
 | 5 | "중간" 검사, 자기 보호, 패턴 팩 업데이트 | WO-36 ~ WO-42 | 7-1 P5 통과 + 7-2 R1(전체)·R13·R15(패턴)·R17 확인 | 나머지 검사, 자기 보호, 패턴 업데이트 |
@@ -1104,6 +1104,8 @@ sequenceDiagram
   8-1. WO-12 리뷰에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `CollectCoordinator.fit`(수준 → 먼저 잡힌 것 순서, 쏟아내기 중 오래된 진짜 탐지가 맨 앞, 요약을 탐지보다 먼저 싣고 최대 크기 2,000건도 들어감, 요약에서 이번 findings 지문 빼기, 4바이트 글자 2,000자 × 1,000건 ≈ 8MB가 4MB 안으로, 검사별로 자른 수에 더하기, 개수 상한 1,000), 같은 사용자 동시 `collect` 한 번 실행·20초 안 재요청 `rateLimited`, ack 형식 오류 `invalidInput`·ack 뒤 요약이 돌아옴, 검사 공백은 ack로만 지워짐(Q67)·첫 ack 전에도 잼, 검증 실패 연결·비정상 종료 묶기(uid별, 1분)와 `prepareForExit`, 되돌리기 거부와 기록 1번, 자기 무결성 Finding·기록, 첫 `collect` 전 정리·하루 안에는 다시 안 함, `CommandRunner` 대기 취소 3가지, `SelfIdentity` 오류 경로, `BundleIntegrity`(임시 폴더 소유·서명 둘 다, 없는 경로, Calculator.app 통과, 틀린 요구사항), `DaemonLifecycleState`(유휴 종료, 작업 중 앱이 죽음, 새 빌드는 연결 무시·응답 여유, 업데이트 중 끊김·`updating` 되풀이로 붙잡지 못함, 묵은 유휴 확인이 되살아나지 않음).
   8-2. WO-13 리뷰에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `RiskStore`(저장·권한 0600/0700, 깨진 파일·다른 버전·링크·폴더 거부, 형식 거르기·미래 해결 시각, 파일 판정 불신(바꿔치기한 높음이 규칙 수준으로), 요약 대조(제목·증거 바꿔치기가 요약으로 다시 만들어짐, 그대로인 증거는 보임), 되살리기·해결·잘린 응답·pending·실패한 검사(확인 못 한 것은 해결), 40MB를 상한 안으로 줄여 쓰고 다시 읽힘·낮은 수준부터 증거 비움, 순서 고정, 정리와 상한), `AppSettings`(주기 범위·밖에서 늘린 것 알림, 일시정지 메모리·24시간·벽시계 무관·줄이기는 약화 아님), `ScanPipeline`(알림·전부 저장·전부 ack, 0건 빈 ack, ack 실패 뒤 다시 알리지 않음, ack 뒤·ack 응답을 잃은 뒤 다시 나타나면 다시 알림, 파일에 심은 지문이 알림을 막지 못함, 쓰기 실패면 ack 안 하고 알림은 감, 판정 검증(올림 허용·높음 고정·규칙 표시 덮기·빠진 건 채우기·이유 자르기), 1,000개씩 ack, 겹친 실행 합치기, 되살림 보고), `ScanScheduler`(시작·주기·주기 단축·일시정지·지금 검사·자동 만료·재개, 시작 전 변경 무시, 검사 도중 일시정지 끝남 알림), `ReconnectPolicy`(재시도·포기·`rateLimited` 한 번·`updating`·Debug 머리 빌드·재실행 조건).
   8-3. WO-14 리뷰에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `CollectFailureAction`(`needsRelaunch` → 재실행, `rateLimited` → 무시, 원인별 상태), `ScanPipeline`(쓰기 실패해도 보고·알림이 ack보다 먼저 끝남), `ScanScheduler.onSchedule`(다음 대기 알림), `StatusIcon`(우선순위 전부 — 믿을 수 없음 > 감시가 돌지 않음(미등록·승인 대기 포함) > 알림 꺼짐 > 일시정지 > 연결 중·살펴볼 것·정상, 위험이 있으면 앞의 넷은 모양 그대로 빨강·뒤는 위험 아이콘), `Finding.displaySafe`(bidi·폭 없는 문자·줄 구분자·점자 빈칸·사설 영역을 공백으로, 결합 문자 4개, 여러 줄이면 \n·\t 유지, 두 번 해도 같음), `RiskStore`(파일에 심은 bidi·줄바꿈 제목과 결합 문자 더미 증거 줄을 버림, 데몬 응답은 저장하고 다시 읽을 때 버림), `ScanPipeline.verified`(LLM 이유 정리 뒤 500자). 무작위 시험: `CheckRunner.clean` 결과가 `displaySafe`로 다시 바뀌지 않음(재리뷰 실측).
+  8-4. WO-53에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `WatchState`(우선순위 — 믿을 수 없음 > 감시 멈춤 > 알림 꺼짐 > 일시정지 > 살펴볼 것·정상, 연결 중, `isCalm`), 모든 데몬 상태 × 알림 × 일시정지 × 살펴볼 것 × 위험 조합에서 `StatusIcon` 두 init이 같고 패널 머리와 위험 표시가 어긋나지 않음, `PanelHeadline` 글(수준별 수, 감시 멈춤이면 이유 + 위험 수), `DaemonStatus.detail` 빈 글 없음, `PanelTime`(방금·미래 시각·분·시간·남은 시간 올림·한국어 시각), `PanelBanner.list`(순서·1분 미만 문구·verbatim은 검사 ID 배너뿐·바로가기)와 `needsAttention`(실패한 검사 포함), 승인 대기 머리(주황).
+  8-5. WO-54·56에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `DemoRiskCheck.parse`(주석·빈 줄·모르는 수준·제목 없는 줄 건너뜀, CRLF 줄바꿈, 탭·전각 공백, 같은 제목·수준은 한 번, 20줄·제목 상한, 지문은 제목+수준), `FindingLedger.forgetChecks`·`CheckRunner`(데모 검사가 있는 데몬이 낸 기록을 같은 폴더의 데모 없는 데몬이 다음 실행에서 해결로 보내고 pending은 다시 알리지 않음·`checkRetired` 기록·다음 실행은 할 일 없음, 내부 실패 기록은 치우지 않음, 버린 pending의 기준값은 `.stale`로). Debug 전용 검사가 Release `haetaed`에 없는지(`strings`)는 테스트가 아니라 WO-44 릴리스 스크립트에서 본다.
   9. `ScanPipeline`: 가짜 `FindingSource`·`RiskJudge`로 ack 순서(저장·알림 다음에 ack), 새 위험만 알림, 오류 뒤 다음 주기에 회복
   10. `ScanScheduler`·`AppSettings`: 주기 상·하한, 일시정지 자동 만료·메모리에만·벽시계 무관, 바꾸면 스케줄러가 깨어남(가짜 Clock)
   11. `RiskStore`: 파일 권한 0600, 30일 정리
@@ -1296,6 +1298,7 @@ sequenceDiagram
 - 대상: `Tools/release/release.sh`(신규)
 - 변경: Release 빌드(`xcodebuild archive -onlyUsePackageVersionsFromResolvedFile` → export, `-skipMacroValidation`·`-skipPackagePluginValidation` 금지 — D16) → Developer ID Application 서명(`--options runtime --timestamp`) 확인 → `pkgbuild --root`(설치 위치 `/Applications`, 소유자 root) + `productbuild --sign "Developer ID Installer: …"` → `xcrun notarytool submit --wait` → `xcrun stapler staple` → Sparkle `generate_appcast`(EdDSA 키는 키체인) → GitHub Release 업로드(`gh release create`). 비밀값은 환경 변수와 키체인 프로필(`notarytool store-credentials`)로만 쓴다.
 - 금지: 인증서·암호·EdDSA 개인키를 저장소에 넣지 않음
+- 추가 지시(WO-54 보안 리뷰): 배포할 `haetaed`에 Debug 전용 데모 검사가 없는지 확인한다 — `strings -a <archive 앱>/Contents/MacOS/haetaed | grep -c -E 'debug\.demo|demo-risks'` → 0. Debug를 복제한 구성(서명한 베타 등)을 만들면 `DEBUG`가 켜진 채 나갈 수 있다.
 - 추가 지시(WO-3 리뷰): ① 시작 전에 WO-46 절차(개발용 등록 해제)를 1회 실행하고 `/Applications/Haetae.app`(Debug 사본)을 지운다. ② 버전은 pbxproj 프로젝트 수준 `CURRENT_PROJECT_VERSION`을 올려 커밋한 뒤 빌드한다(배포한 번호가 저장소에 남아야 다음 릴리스가 더 낮은 번호로 나가지 않는다 — 낮으면 Release 데몬이 되돌리기로 판단해 거부한다). ③ `pkgbuild --analyze --root "$STAGE" comp.plist` → `plutil -replace 0.BundleIsRelocatable -bool NO comp.plist` → `pkgbuild --root "$STAGE" --component-plist comp.plist --install-location /Applications` (기본값은 재배치 가능이라, 같은 번들 ID의 다른 사본(DerivedData 등)이 있으면 `/Applications`가 아니라 그 사본을 덮어쓴다 — D31·T5가 무력화됨). ④ 빌드 번호 일치 검사: 앱 `CFBundleVersion`, 데몬 `__info_plist`의 `CFBundleVersion`, `HaetaeMinBuild` 셋이 다르면 중단.
 - 완료 판정: dry-run 모드(`--dry-run`)가 각 단계 명령을 출력. `plutil -extract 0.BundleIsRelocatable raw comp.plist` → `false`. archive의 `Products/`에 `Applications/Haetae.app` 하나만 있고 그 안의 `haetaed`가 `codesign --verify --strict` 통과. export한 데몬이 실제로 뜸. `otool -l <archive 앱>/Contents/MacOS/* | grep -A2 LC_RPATH`에 `/Users/`·`/Volumes/` 없음(Debug 산출물에는 로컬 절대 경로가 들어 있음). `rg -n 'skipMacroValidation|skipPackagePluginValidation|disable-sandbox' Tools/` → 0곳. `Haetae`·`haetaed` 스킴을 Shared로 커밋(`Haetae.xcodeproj/xcshareddata/xcschemes/`) — 깨끗한 클론이 자동 생성 스킴에 기대지 않게
 
@@ -1405,6 +1408,79 @@ sequenceDiagram
 - 변경: `ParserProcess.enterSandbox()` — `dlsym`으로 찾은 `sandbox_init`에 `(version 1)(deny default)`와 플래그 0을 넘기고, 반환값과 별개로 `/`가 `EPERM`으로 안 열리는지 확인한다(하나라도 어긋나면 false → 자식이 77로 끝남). `run`의 순서는 `dropPrivileges` → `enterSandbox` → `limitResources` → 입력 읽기(샌드박스가 fd 상한보다 먼저 — 확인하려면 파일을 열어 봐야 한다).
 - 실측 (2026-11-24, 비-root, 새로 빌드한 `haetae-parser --parse plist … | cat`): XML·바이너리 plist 종료 0·출력 정상, 깨진 바이너리 plist 65, 형식 인자 오류 64, 실제 plist 48개(`/Library/LaunchDaemons`, `/System/Library/LaunchDaemons/com.apple.a*`, Finder 설정) 모두 종료 0. 같은 프로필을 건 시험 프로그램에서 파일 열기·fd를 닫은 뒤 다시 열기·`connect`·`bootstrap_look_up`·`execv`가 모두 막힘(Q56 실측). `setrlimit`는 샌드박스 앞뒤 어느 쪽에서도 된다.
 - 완료 판정: 경고 0, 테스트 통과. 사용자 sudo로 `/Applications` 사본에서 `sudo -u nobody … --parse plist`와 `sudo … --parse plist`(root → nobody로 내린 뒤 샌드박스)가 종료 0. 별도 에이전트 리뷰(보안, 설계).
+
+### WO-53: 패널 다시 그리기 (R4, Q73~Q79, D12)
+- 상태: [x] 완료 (2026-11-27) — Q73~Q79 결정 반영(브랜드: 미드나이트 인디고 + 민트). 별도 에이전트 리뷰 2개(설계·보안)와 재리뷰 반영 — 마지막에 두 리뷰 모두 Medium 이상 없음·커밋 가능. `xcodebuild` 3종 성공·경고 0, `swift test` 43개, 임시 테스트 WO-13 50개·WO-12 29개, 렌더 도구로 10가지 화면 확인. 확인 못 함: 실제 메뉴바 창(재질 바탕, "…" 메뉴 단축키, 알림 설정 바로가기) — 7-2 R4. 임시 테스트 시나리오는 WO-19 8-4번 · 의존: WO-14 · 충족: R4(② "다음 검사까지 남은 시간" 포함)
+- 목표: 패널이 "지금 안전한가요?"에 한눈에 답한다. 지금(WO-14)은 개발자용 정보(빌드·패턴 버전·판정)가 표로 앞에 있고, 버튼 4개가 같은 무게이고, 남은 시간이 아니라 시각만 보인다(2026-11-27 사용자 화면).
+- 대상: `Haetae/Panel/`(새 폴더 — 동기화 그룹이라 pbxproj는 그대로) `PanelView`(조립)·`PanelHeader`·`NextScanView`·`PanelBanners`·`RiskListView`·`RiskRow`·`PanelFooter`, `Haetae/PanelView.swift`(옮김), `Haetae/ScanController.swift`(`isScanning`), `HaetaeKit/Sources/HaetaeAppCore/`(헤더 판단), `Haetae/Panel/PanelStyle.swift`(브랜드 색은 코드로 — 밝은·어두운 모드를 `NSColor` 동적 색으로. 에셋이 아니라서 저장소 밖 이미지 확인에서도 같은 색이 나온다)
+- 변경:
+  0. 판단은 패키지, 화면은 그리기만(WO-14와 같은 원칙): 지금 상태(`WatchState` — 믿을 수 없음·감시 멈춤·알림 꺼짐·일시정지·연결 중·살펴볼 것·정상)를 한 곳에서 정하고, 메뉴바 아이콘(`StatusIcon`)과 패널 머리(`PanelHeadline` — 기호·제목·설명·색 역할)가 둘 다 그것에서 나온다(아이콘과 패널이 다른 말을 하지 않게). 하위 뷰는 `AppState`·`ScanController`를 모르고 값만 받는다(조립은 `PanelView`) — 저장소 밖에서 같은 파일로 화면을 그려 볼 수 있게. 판단 시험은 저장소 밖 임시 테스트(WO-19로 옮김).
+  1. 헤더: 원 안 상태 기호 + 결론 한 줄("보호 중", "위험 N건 발견", "감시가 멈췄어요", "데몬을 믿을 수 없어요", "일시정지 중", "연결 중") + 부제(수준별 수, 마지막 확인 상대 시각). 상태가 바뀌면 `.contentTransition(.symbolEffect(.replace))`.
+  2. 다음 검사: "다음 검사까지 N분" + 주기 대비 진행 막대(`TimelineView`, 30초마다). 일시정지 중이면 "HH:mm까지 일시정지" + 재개. 검사 중이면 "검사 중…" + 기호 애니메이션(Q77 — `ScanController.isScanning`, 스케줄러가 돌릴 때 켜고 보고를 받으면 끈다).
+  3. 경고 배너(Q76): 알림 꺼짐 → "알림 켜기"(시스템 설정의 Haetae 알림 화면), 승인 필요 → "로그인 항목 열기", 설치 필요 → 안내. 못 보낸 건(높음)·검사 공백·실패한 검사·저장/ack 실패·기록 재구성은 짧은 배너. 실패한 검사 ID는 `Text(verbatim:)`.
+  4. 위험 목록: 수준 배지(색 + 글) + 제목 + 이유 한 줄, 누르면 그 자리에서 펼친다(Q75 2번): 이유 전체, 검사 ID, 발견 시각, 증거(데몬이 가린 글 — 고정폭, `Text(verbatim:)`, 선택 가능, 8줄까지 보이고 "더 보기"). 확인 전(`isVerified` false) 항목은 증거를 보이지 않는다 — 파일에서 읽고 아직 데몬 응답으로 확인 못 한 글이라 같은 사용자가 바꿔 둘 수 있다(확인되면 보인다). 증거가 빈 항목(요약으로 되살림)은 "증거는 다음 검사에서 다시 받아요".
+  5. 위험 없음: 안심 문구. 한 번도 검사 못 했으면 "아직 검사하지 않았어요"(WO-14 그대로).
+  6. 아래: "지금 검사"(주 버튼, 하나만) + 일시정지 아이콘 버튼 + "…" 메뉴(설정, 종료). 맨 아래 작은 글씨 한 줄 "규칙 판정 · 패턴 v1 · 데몬 빌드 1"(Q74 1번) — WO-23은 판정 자리에 모델 이름·상태를 넣는다.
+  7. 모양(Q73 2번): 브랜드 색(Q79 — 미드나이트 인디고 바탕·주 버튼, 민트 포인트)은 강조(헤더 원 테두리·주 버튼·진행 막대·선택)에만. 상태 색(초록·노랑·빨강)은 의미 색으로 따로 둔다 — 브랜드 색과 헷갈리지 않게. 밝은·어두운 모드 둘 다. 메뉴바 아이콘은 그대로(템플릿, macOS 관례 — WO-14 `StatusIcon`).
+  8. 접근성: 색만으로 구분하지 않는다(기호 + 글), VoiceOver 이름, 키보드로 펼치기·버튼, 줄은 `.accessibilityElement(children: .combine)`.
+- 구현(2026-11-27 — 리뷰 대기):
+  1. 패키지 `HaetaeAppCore/WatchState.swift`(신규): `WatchState`(우선순위 한 곳, `isCalm`), `StatusIcon`(옮김 — `init(state:hasRisk:)` 추가, 옛 init은 그대로), `PanelHeadline`(기호·제목·설명·`Tone`), `PanelTime`(방금·N분 전·남은 시간·한국어 시각 — 앱 현지화가 영어뿐이라 `Locale.current`면 "11:38 AM"). `DaemonStatus.detail`(사람이 읽는 한 줄, 패널에서 옮김). 쓰이지 않게 된 `DaemonStatus.isProblem`은 지웠다.
+  2. 앱 `Haetae/Panel/`: `PanelView`(조립·배너 목록·바로가기 동작), `PanelHeader`, `NextScanView`(진행 막대는 직접 그림 — 시스템 막대는 창이 앞에 없으면 회색), `PanelBanners`(바로가기는 배너 색 캡슐 버튼), `RiskListView`(펼침, 증거 8줄 + 더 보기, 확인 전은 증거 숨김, 최대 높이 360), `PanelFooter`(주 버튼 하나·쉬기/다시 시작·"…" 메뉴, ⌘R·⌘,·⌘Q), `PanelStyle`(브랜드 색 — 인디고 #26215C/#3C3489, 주 버튼 #534AB7/#5E55C6, 민트 #3FB68E/#5DCAA5, 버튼 모양). `ScanController.isScanning`(스케줄러가 돌릴 때만)·`needsAttention`(아이콘에서 옮김), `AppState.watchState`. 메뉴바 아이콘도 `watchState`에서. 설정 창은 강조색만 브랜드로.
+  3. 확인: `xcodebuild` haetaed Debug·Haetae Debug·Release 성공·경고 0, `swift test` 43개, 임시 테스트 WO-13 48개(`WatchState` 우선순위, 아이콘과 패널 머리가 모든 조합에서 같은 말, 머리 글, 시간 글)·WO-12 29개. 저장소 밖 렌더 도구(하위 뷰 파일을 그대로 복사해 `NSHostingView`로 그림)로 10가지 화면(정상·위험·감시 멈춤+위험·알림 꺼짐·일시정지·검사 중+확인 전·승인 필요·어두운 모드 3)을 이미지로 보고 고침 — 진행 막대 색, 배너 버튼, 목록 높이, 검사 중 문구 중복, 감시 멈춤일 때 이유를 남김. 확인 못 함: 실제 메뉴바 창(재질 바탕, "…" 메뉴, 알림 설정 바로가기 주소가 이 앱 화면을 여는지) — 새 빌드 설치 뒤 사용자가.
+- 리뷰 반영(2026-11-27, 설계·보안 — 설계 Medium 1, 두 리뷰 모두 그것만 고치면 커밋 가능):
+  1. 실패한 검사가 있어도 머리가 "보호 중 · 이상 없음"이었다(설계 M1 — 배너와 반대말, 검사를 몰래 꺼 버리는 것(T12)이 머리·아이콘에 안 드러남). 살펴볼 것 판단(`PanelBanner.needsAttention`)에 실패한 검사를 넣었다.
+  2. 배너 판단을 패키지로(설계 L2): `HaetaeAppCore/PanelBanner.swift` — `PanelBanner.list(...)`(무엇을 어떤 순서로, 1분 미만 문구, verbatim 여부, 바로가기)와 `needsAttention`. 화면은 그리기만.
+  3. 확인한 지문은 `ScanController.verifiedFingerprints`로 `risks`와 같은 때에만 바꾼다(보안 L1 — 그릴 때마다 저장소에서 읽으면 맞추기 뒤·다시 읽기 전 사이에 파일에 심은 옛 증거가 "확인됨"으로 보일 수 있었다). `ScanController.isVerified`는 지웠다.
+  4. 긴 제목: 접으면 가운데를 줄이고(`.truncationMode(.middle)` — 앞에 긴 경로를 붙여 진짜 파일 이름을 숨기지 못하게), 펼치면 전체(보안 L2).
+  5. 승인 대기·미등록처럼 스케줄러가 안 돌면 다음 검사 칸과 "지금 검사"를 감춘다(`ScanController.isStarted`, 설계 L1 — 눌러도 아무 일도 없었다). 승인 대기 머리는 주황 "승인이 필요해요 · 허용하면 감시를 시작해요"(처음 실행 단계라 빨강으로 놀라게 하지 않음, 설계 의견), 승인 배너도 주황.
+  6. 작은 주황·빨강 글은 진한 색(`StatusColor` — 흰 바탕 4.5:1, 설계 L3): 수준 배지, 배너 바로가기 글자.
+  7. 접근성(설계 L4·보안 의견): 위험 줄은 "높음 수준. 제목: …. 이유: …. 표시: 확인 전"처럼 탐지 글과 앱 표시를 나눠 읽고 펼침 상태를 값으로, 다음 검사 칸은 기호를 숨기고 한 덩어리로. 시간 글은 `TimelineView(.everyMinute)`(분 경계에 맞게, 설계 의견).
+  8. 남긴 것: "…" 메뉴의 ⌘,·⌘Q가 메뉴를 열기 전에도 동작하는지(설계 L5, 추측) — 7-2에서 확인. 머리의 위험 수에 확인 전 항목도 든다(숨기는 쪽이 아니라 그대로, 보안 의견). WO-23 모델 다운로드 진행률 자리는 그 WO에서(설계 의견). 강제 업데이트(WO-43)는 `WatchState`에 case를 더한다.
+  9. 확인: `xcodebuild` 3종 성공·경고 0, `swift test` 43개, 임시 테스트 WO-13 50개(배너 순서·verbatim·바로가기, 실패한 검사 = 살펴볼 것, 승인 대기 머리)·WO-12 29개, 렌더 도구로 10가지 화면 다시 봄(긴 제목 가운데 줄임, 승인 대기 주황·다음 검사 칸 없음).
+- 재리뷰(2026-11-27, 두 리뷰 모두 Medium 이상 없음·커밋 가능, 지난 지적 모두 닫힘 — 대비는 밝은 모드 빨강 6.5:1·주황 6.3:1로 계산): 주석 한 줄(승인 배너는 이제 주황)을 고쳤다. 남긴 의견: 가운데 줄임은 가운데에 끼운 글은 접힌 상태에서 여전히 가린다(펼치면 전체 — 충분하다고 봄), 실패한 검사가 늘 나는 환경이면 머리가 늘 "살펴볼 것"(WO-15 이후 실제 검사로 보고 정함), VoiceOver에서 제목 안의 "표시: …" 글은 순서로만 구분.
+- 사용자 화면 확인 반영(2026-11-27, 새 빌드 설치 뒤 어두운 모드): ① 다음 검사 칸이 바탕과 잘 구분되지 않음 → 카드 바탕을 조금 진하게 하고 테두리를 둠(`CardBackground`), 진행 막대 바탕도 진하게. ② 아이콘 버튼(쉬기·"…")이 흐려 꺼진 것처럼 보임 → 기호를 진한 글자색으로, 바탕·테두리도 진하게. ③ 메뉴바 방패를 조금 크게(16pt, `MenuBarIcon` — 템플릿·빨강 모두 같은 크기, 기호별로 한 번만 만듦). ④ 15분 주기를 막 시작했을 때 "16분"으로 보임 → `PanelTime.remaining`을 올림 대신 반올림(30초 미만이면 "곧"). ⑤ 로그 `알림 서버 응답 없음`이 검사마다 잘못 찍힘 — 알림 서버는 바로 답했는데(usernoted 로그로 확인) `Notifier.withDeadline`이 일이 끝난 뒤에도 5초 타이머를 멈추지 않아 로그를 남겼다(WO-14부터, 상태 값은 맞았음). 일이 끝나면 타이머를 취소한다. 이 다섯 가지는 모양·로그 수정이라 별도 리뷰는 받지 않았다. 확인: 빌드 3종·경고 0, `swift test` 43개, 임시 테스트 50개(반올림 경우 추가), 렌더 이미지 다시 봄.
+- 사용자 체험 반영(2026-11-27, 데모 위험 3건): 위험 목록이 메뉴바 창에서 작게 접혀 스크롤해야 보였다(메뉴바 창 안의 스크롤 칸은 스스로 높이를 못 잡음). 3건까지는 스크롤 없이 다 보이고, 넘으면 앞 3줄 높이 + 다음 줄 28pt만 보이는 스크롤 칸으로(줄 높이는 `onGeometryChange`로 잼, 앞 줄을 펼쳐도 520pt까지). 렌더 이미지로 3건·5건 확인.
+- 사용자 확인(2026-11-27, 새 빌드 설치 뒤): 위험 3건이 스크롤 없이 다 보임, 위험을 펼쳐 "더 보기"가 열림, 설정 창 탭 — 모두 정상. 알림(2건 — 낮음은 세지 않음)·메뉴바 빨강도 겪음. 패널 목록 줄 수와 알림 건수 차이는 사용자 결정으로 그대로 둠(Q82).
+- 금지: 탐지에서 온 글(제목·이유·검사 ID·증거)은 `Text(verbatim:)`로만(D12). 알림 문구·`Notifier`는 바꾸지 않는다. 새 의존성·빌드 설정 변경 금지.
+- 완료 판정: 앱 빌드 성공·경고 0, `swift test` 그대로 통과, 임시 테스트(헤더 판단), `rg "Text\(verbatim" Haetae`에 제목·이유·검사 ID·증거가 모두 있음. 상태별 화면(정상·위험·감시 멈춤·일시정지·검사 중·알림 꺼짐·펼친 줄·밝은/어두운)을 저장소 밖에서 `ImageRenderer`로 이미지로 그려 직접 보고 사용자에게 보인다. 7-2 R4는 새 빌드 설치 뒤 사용자가 확인.
+
+### WO-54: Debug 전용 데모 검사 (Q80 2번, 임시)
+- 상태: [x] 완료 (2026-11-27) — 별도 에이전트 리뷰 2개(설계·보안)와 재리뷰 반영, 마지막에 두 리뷰 모두 커밋 가능. Release 앱의 `haetaed`에 데모 글자 0곳. 사용자가 설치 뒤 데모 3건으로 알림·메뉴바 빨강·패널을 겪음(2026-11-27). 해결 흐름(줄 지우기)은 사용자가 원할 때 · 의존: WO-53 · 충족: 없음(체험용 — 실제 검사 WO-15~18 전에 위험이 났을 때의 화면·알림·해결 흐름을 사용자가 겪어 보게)
+- 목표: 사용자 폴더의 표시 파일에 적은 줄마다 위험 하나를 낸다. 데몬 → 응답 → 앱 알림 → 패널 → ack → 줄을 지우면 다음 검사에서 해결까지 실제 흐름 그대로.
+- 대상: `HaetaeKit/Sources/HaetaeChecks/Debug/DemoRiskCheck.swift`(신규, 파일 전체가 `#if DEBUG`), `haetaed/main.swift`(`#if DEBUG`일 때만 검사 목록에 더함)
+- 변경:
+  1. `DemoRiskCheck`(id `debug.demo`, 기준값 없음, 시간 상한 2초): 호출 사용자의 `~/Library/Application Support/Haetae/demo-risks.txt`를 `ctx.reader.read(path:asUser:maxBytes:)`(사용자 권한, 링크·남의 파일 거부)로 16KB까지 읽는다. 사용자를 모르면 `partial`. 파일이 없으면(`ENOENT`) 빈 결과 — 전에 낸 것은 해결로 간다. 그 밖의 읽기 오류는 던진다(검사 실패 배너도 겪어 보게).
+  2. 줄 형식: `high|medium|low 제목`(또는 `높음|중간|낮음`). 빈 줄·`#`로 시작하는 줄은 건너뛴다. 20줄까지. 제목은 200자까지 자른다(나머지는 `CheckRunner.clean`이 정리·가림). 증거는 고정 문구 + 파일 경로 + 줄 번호. 지문 = `Fingerprint.make(checkID:, subject: 제목, contentHash: 수준)` — 같은 줄이면 같은 지문(다시 알리지 않음), 수준을 바꾸면 새 위험.
+  3. Release에는 들어가지 않는다: 파일 전체와 `main.swift`의 추가가 `#if DEBUG`. 확인은 Release `haetaed` 바이너리에 `DemoRiskCheck`·`debug.demo` 글자가 없는지(`strings`/`nm`).
+- 금지: Release 빌드에 포함 금지. 다른 검사·엔진 코드 변경 금지. root 권한으로 사용자 파일을 직접 열지 않는다(`SafeFileReader`만).
+- 완료 판정: haetaed Debug·Release 빌드 성공·경고 0, Release 바이너리에 데모 검사 흔적 없음, 줄 해석 임시 테스트, 사용자가 설치 뒤 파일을 만들고 지워 알림·패널·해결을 겪음. 실제 검사 WO가 들어오면 지워도 된다(지울 때 이 WO에 적는다).
+- 구현(2026-11-27 — 리뷰 대기): 위 1~3번 그대로. 줄은 줄바꿈 글자 전부로 나눈다(`"\r\n"`은 Swift에서 한 글자라 `"\n"`으로 나누면 두 줄이 합쳐졌다 — 임시 테스트가 잡음). 같은 제목·수준 줄은 한 번만. 확인: haetaed Debug·Haetae Debug·Release 성공·경고 0, `strings`로 Release 앱의 `haetaed`에 `debug.demo`·`demo-risks` 0곳(Debug 앱 2곳), 임시 테스트 WO-11 32개(데모 3개 — CRLF·주석·빈 줄·모르는 수준·겹침·20줄·제목 상한·지문), `swift test` 43개.
+- 리뷰 반영(2026-11-27, 설계·보안 — 보안 High·Medium 없음, 설계 Medium 1, 두 리뷰 모두 커밋 가능. 보안이 Release 바이너리를 `strings`·`nm`으로 직접 봄 — 코드 없음, 디버그 맵 줄만): 수준 뒤 탭·전각 공백도 받음(설계 L1), 증거에서 줄 번호를 뺌(위에 줄을 더하면 증거가 바뀌어 앱 대조가 어긋남, 설계 L2).
+- **지우기·Release 설치 전 절차(설계 M1)**: 데모 검사가 없는 데몬(Release, 또는 이 WO를 지운 빌드)은 이미 알린 데모 위험을 해결로 보내지 못한다 — 해결은 이번에 성공한 검사의 기록만 보고(`FindingLedger`), 30일 정리 전까지 패널·아이콘이 빨강으로 남으며 root 원장이라 사용자가 지울 수 없다. 그 전에 ① `demo-risks.txt`를 지우고 ② Debug에서 "지금 검사"를 한 번 돌려 해결로 보낸 뒤 ③ 바꾼다. 엔진이 "지금 등록되지 않은 검사 ID의 기록은 해결"로 보는 규칙은 WO-56(Q83 1번)에서 — 그 뒤로는 위 절차가 필요 없다.
+
+### WO-55: 설정 창 탭 (Q81 2번)
+- 상태: [x] 완료 (2026-11-27) — 리뷰 2개와 재리뷰 2번 반영, 두 리뷰 모두 커밋 가능. 사용자가 설치 뒤 일반·알림·정보 탭 확인(2026-11-27) · 의존: WO-53 · 충족: R6(주기), R12(로그인 시 실행)
+- 목표: 설정 창이 빈약하다(2026-11-27 사용자). 탭(일반·알림·정보)으로 나누고 지금 있는 것을 보기 좋게 모은다. 새 기능은 없다. WO-23 모델 설정은 탭을 하나 더해 넣는다.
+- 대상: `Haetae/SettingsView.swift`, `Haetae/Notifier.swift`(알림 설정 화면 열기를 패널과 같이 쓰게 옮김), `Haetae/Panel/PanelView.swift`(그것을 부름)
+- 변경: `TabView` + `Tab`(macOS 15). 일반 — 검사(주기, 다음 검사 시각), 시작(로그인 시 실행, 설명, 로그인 항목에서 꺼져 있을 때 안내·버튼, 실패 표시). 알림 — 켜짐/꺼짐 상태, "알림 설정 열기", 알림 본문에는 탐지 내용을 넣지 않는다는 설명(D12). 정보 — 버전(빌드), 데몬 상태(`DaemonStatus.detail`), 판정 방식, 패턴 버전, 마지막 검사. 모양은 `Form`의 `.grouped`. 강조색은 토글에만(메뉴 글자는 기본 색 — 사용자 화면 확인).
+- 완료 판정: 앱 빌드 성공·경고 0, 사용자가 설치 뒤 확인.
+- 구현(2026-11-27 — 리뷰 대기): `SettingsView`를 `TabView` + `Tab` 3개(`GeneralSettings`·`NotificationSettings`·`AboutSettings`, 각각 `Form` `.grouped`)로. 다음 검사는 쉬는 중이면 "HH:mm까지 쉬어요". 알림 설정 열기는 `Notifier.openSystemSettings()`로 옮겨 패널 배너와 같이 쓴다. 로그인 시 실행 실패는 `StatusColor.dangerText`. 확인: Haetae Debug·Release 성공·경고 0. 확인 못 함: 실제 창 모양(설치 뒤 사용자).
+- 리뷰 반영(2026-11-27, 두 리뷰 모두 커밋 가능): 알림 상태는 설정 창·패널이 열릴 때 다시 읽는다(`ScanController.refreshNotifications`를 밖에서 부름 — 알림을 켜고 돌아와도 다음 검사까지 "꺼져 있어요"였다, 설계 L3). 판정 이름을 `ScanController.judgeName` 한 곳에(설계 L4 — WO-23이 고칠 곳). 검사 쪽이 없으면 알림 상태 "알 수 없어요"(보안 의견). 잠금 화면 설명을 "시스템의 미리보기 설정을 따라요"로(본문을 늘 가리는 것은 아님, 보안 L).
+- 재리뷰 반영(2026-11-27, 두 리뷰 모두 커밋 가능): 열려 있던 설정 창으로 돌아오면 `.task`가 다시 돌지 않아 알림 상태가 그대로였다(설계 L1) — `ScanController`가 앱이 앞으로 올 때(`NSApplication.didBecomeActiveNotification`) 다시 읽는다. 위험 목록은 3건 이하여도 펼친 증거로 전체가 520pt를 넘으면 스크롤 칸으로(아래 버튼이 화면 밖으로 밀리지 않게, 보안 L).
+- 2차 재리뷰(2026-11-27, 두 리뷰 모두 커밋 가능, WO-56 지적 모두 닫힘): 3건 이하에서 "더 보기"를 누르면 목록이 스크롤 칸으로 바뀌며 줄이 새로 만들어져 바로 다시 접혔다(설계 L1) — 증거 펼침 상태를 줄 안이 아니라 `RiskListView`의 집합(`showsAllEvidence`)으로 올렸다(`expanded`와 같은 방식). 보안은 두 모양 사이를 오가며 깜빡이지 않는 것을 확인(스크롤 칸 안에서는 줄이 좁아져 더 길어지므로 한번 넘으면 머문다).
+
+### WO-56: 등록되지 않은 검사의 기록 해결 (Q83 1번)
+- 상태: [x] 완료 (2026-11-27) — 리뷰 2개와 재리뷰 반영, 두 리뷰 모두 Medium 이상 없음·커밋 가능(공격자가 진짜 위험을 해결로 보낼 길 없음). 임시 테스트 시나리오는 WO-19 8-5번 · 의존: WO-54 · 충족: R11(기록 정리)
+- 문제(WO-54 설계 리뷰 M1, 실측): 해결 판정(`FindingLedger.resolved`)은 이번에 성공한 검사의 기록만 본다. 그래서 지금 돌리지 않는 검사 — Debug 전용 데모 검사가 없는 Release, 지운 검사, 이름을 바꾼 검사 — 의 알림 완료 기록은 30일 정리 전까지 남아 패널·아이콘이 빨강으로 남는다. root 원장이라 사용자가 지울 수 없다. Debug와 Release가 같은 root 폴더를 쓴다(Q34).
+- 대상: `HaetaeKit/Sources/HaetaeChecks/Store/FindingLedger.swift`(`forgetChecks(notIn:uid:)` 추가), `HaetaeKit/Sources/HaetaeChecks/Engine/CheckRunner.swift`(실행마다 부름)
+- 변경:
+  1. `FindingLedger.forgetChecks(notIn known:, uid:) -> [String]`: 알림 완료 건 중 checkID가 `known`에 없는 것은 지우고 해결 지문으로 돌려준다(원장 `resolved` 기록). pending 중 그런 것은 버린다(`pendingDropped` 기록) — 다시 나타날 수 없는 검사의 옛 탐지를 새로 알리지 않게.
+  2. `CheckRunner`: 아는 checkID = 등록된 검사 id ∪ 내부 상태 id(`haetae.check-failure`·`haetae.storage`). `filterNew` 앞에서 부르고, 돌려받은 지문은 이번 응답의 `resolved`에 더한다(앱이 패널에서 내린다).
+  3. 보안: 아는 목록은 데몬에 컴파일된 것이라 같은 사용자 공격자가 바꿀 수 없다(패턴 팩도 검사 목록을 못 바꾼다). 옛 빌드로 되돌려 새 검사의 기록을 해결로 보내는 길은 Release에서 되돌리기 거부(D20 `HighestBuild`)가 막는다. Debug는 막지 않는다(Q34) — 개발용.
+- 금지: 다른 해결 규칙(실패한 검사의 기록은 해결로 보내지 않음, T12) 바꾸기 금지.
+- 완료 판정: `swift build` 경고 0, 임시 테스트(원장 단위 + `CheckRunner` 실행으로 응답 `resolved`에 들어가는지), 빌드 3종. 사용자 확인: 데모 위험이 남은 채 Debug(데모 검사 있음) → 데모 검사를 뺀 빌드로 바꿔도 다음 검사에서 사라짐(선택).
+- 구현(2026-11-27 — 리뷰 대기): 위 1·2번 그대로. `CheckRunner`는 아는 checkID를 init에서 한 번 만든다(`knownCheckIDs`). 확인: `swift build` 경고 0, `swift test` 43개, 임시 테스트 WO-12 31개(새 2개 — 데모 검사가 있는 데몬에서 낸 기록을 같은 폴더의 데모 없는 데몬이 다음 실행에 해결로 보내고 pending은 다시 알리지 않음·원장 기록 남김·다음 실행은 할 일 없음, 내부 실패 기록은 치우지 않음)·WO-11 33개·WO-13 50개, 빌드 3종 성공·경고 0.
+- 리뷰 반영(2026-11-27, 설계·보안 — 두 리뷰 모두 Medium 이상 없음·커밋 가능, 공격자가 진짜 위험을 해결로 보낼 길 없음 — 검사가 낸 Finding의 checkID는 `prepare`가 그 검사 id로 덮고, 되돌린 Release 데몬은 `collect`를 실행 전에 거부): ① 버린 pending의 기준값도 치운다(`forgetChecks`가 pending을 버린 checkID를 돌려주고 `CheckRunner`가 `discardPending` — `purge`와 같은 이유, 두 리뷰 L). ② 원장에 `checkRetired(checkID:resolved:droppedPending:)` 사건을 따로 남긴다(상한 초과 `pendingDropped`와 구분, T18). ③ 8장에 "검사 id는 바꾸지 않는다" 규칙. ④ `knownCheckIDs`는 컴파일된 목록에서만 만든다 — 설정·패턴 팩으로 "끈 검사"를 빼면 끄는 것만으로 진짜 위험이 해결로 넘어간다(보안 의견, `forgetChecks` 주석에도 적음). 남긴 것: 지운 검사의 `lastSuccess`·`recentFailures`·기준값 파일은 남는다(해 없음 — 같은 id가 오래 뒤 돌아오면 오래된 `lastSuccess`부터 본다). 확인: 임시 테스트 WO-12 32개(버린 pending 기준값이 `.stale`로 옮겨짐 추가), WO-11 33·WO-13 50, `swift test` 43, 빌드 3종 성공·경고 0.
 
 ## 7. 검증 계획
 
@@ -1532,7 +1608,7 @@ sequenceDiagram
 - agent를 등록한 뒤(WO-5~)에는 Xcode Run으로 뜬 인스턴스가 agent 인스턴스에 양보하고 바로 끝나서 브레이크포인트가 안 걸린다. 디버깅은 스킴 Run ▸ Info에서 Executable을 `/Applications/Haetae.app`(agent가 띄우는 사본, Q33)으로 바꾸고 "Wait for the executable to be launched"를 켠 뒤 `launchctl kickstart -k gui/$(id -u)/com.10000DOO.Haetae.agent`로 다시 띄워 붙는다. Xcode Stop은 SIGKILL이라 launchd가 다시 띄운다 — 완전히 멈추려면 패널의 "종료"를 쓴다(이 프로젝트에서는 아직 확인 안 함).
 - Debug 산출물에는 서명 인증서 이름(Apple ID 메일)과 로컬 절대 경로(LC_RPATH)가 들어 있다. Debug 빌드를 밖에 공유하지 않는다. `.gitignore` 대상이라 커밋되지는 않는다.
 - 되돌리기 방지(`highest-build`)는 Release 데몬만 쓴다(Q34). Debug 데몬은 이 파일을 보지 않으므로 P6 테스트 뒤에도 그대로 돈다.
-- 검사를 쓸 때(WO-11): `CheckResult.findings`의 `checkID`·`observedAt`은 `CheckRunner`가 채우고 title·evidence는 `CheckRunner`가 정리한다(제어 문자, `SecretMasker`, 길이) — 검사는 가리지 않은 원문을 넣는다. 지문은 `Fingerprint.make`로만 만든다(형식이 틀리면 그 검사가 실패로 오른다). 일부를 보지 못했으면(파일 해석 `failed` 등) `partial: true` — 안 보인 Finding이 해결로 가지 않는다. `ctx.user == nil`이면 사용자 부분을 건너뛰되 옛 기준값의 사용자 부분을 `newBaseline`에 그대로 옮긴다(안 옮기면 다음 실행에서 전부 "새로 생김"). 기준값을 바꾸지 않으려면 `newBaseline: nil`. 검사는 취소에 응해야 한다(`runner`·`reader`·`parser`만 쓰면 된다 — 직접 긴 루프를 돌면 `Task.checkCancellation()`). 한 검사가 200건 넘게 내면(이미 알린 것은 빼고 센다) 수준 높은 것부터 200건만 가고, 나머지는 "상한 초과" 높음 Finding과 함께 다음 실행으로 미뤄진다 — 그 실행은 기준값과 `lastSuccess`를 갱신하지 않으므로(첫 실행 제외) 같은 것을 다시 내면 된다. 검사 id는 소문자·숫자·`.`·`-`만(어기면 데몬이 시작 때 멈춘다). `partial: true`면 낮음 Finding이 나가고(최근 5번 중 3번이면 중간, Q62) 그 실행은 `lastSuccess`를 갱신하지 않는다. 기준값은 첫 실행이면 저장·확정하고, 아니면 그대로 둔다(Q57·Q62). 검사 안에서 수집과 판정을 나눈다 — 판정은 수집 결과만 받는 순수 함수로 두어 WO-19가 픽스처로 규칙을 시험할 수 있게. evidence가 길고 많으면 검사당 2초 뒤부터 evidence가 통째로 가려진다(`maskBudget`). 던진 오류는 도메인과 코드만 evidence에 간다.
+- 검사를 쓸 때(WO-11): `CheckResult.findings`의 `checkID`·`observedAt`은 `CheckRunner`가 채우고 title·evidence는 `CheckRunner`가 정리한다(제어 문자, `SecretMasker`, 길이) — 검사는 가리지 않은 원문을 넣는다. 지문은 `Fingerprint.make`로만 만든다(형식이 틀리면 그 검사가 실패로 오른다). 일부를 보지 못했으면(파일 해석 `failed` 등) `partial: true` — 안 보인 Finding이 해결로 가지 않는다. `ctx.user == nil`이면 사용자 부분을 건너뛰되 옛 기준값의 사용자 부분을 `newBaseline`에 그대로 옮긴다(안 옮기면 다음 실행에서 전부 "새로 생김"). 기준값을 바꾸지 않으려면 `newBaseline: nil`. 검사는 취소에 응해야 한다(`runner`·`reader`·`parser`만 쓰면 된다 — 직접 긴 루프를 돌면 `Task.checkCancellation()`). 한 검사가 200건 넘게 내면(이미 알린 것은 빼고 센다) 수준 높은 것부터 200건만 가고, 나머지는 "상한 초과" 높음 Finding과 함께 다음 실행으로 미뤄진다 — 그 실행은 기준값과 `lastSuccess`를 갱신하지 않으므로(첫 실행 제외) 같은 것을 다시 내면 된다. 검사 id는 소문자·숫자·`.`·`-`만(어기면 데몬이 시작 때 멈춘다). `partial: true`면 낮음 Finding이 나가고(최근 5번 중 3번이면 중간, Q62) 그 실행은 `lastSuccess`를 갱신하지 않는다. 기준값은 첫 실행이면 저장·확정하고, 아니면 그대로 둔다(Q57·Q62). 검사 안에서 수집과 판정을 나눈다 — 판정은 수집 결과만 받는 순수 함수로 두어 WO-19가 픽스처로 규칙을 시험할 수 있게. evidence가 길고 많으면 검사당 2초 뒤부터 evidence가 통째로 가려진다(`maskBudget`). 던진 오류는 도메인과 코드만 evidence에 간다. **검사 id는 바꾸지 않는다**(WO-56 설계 리뷰) — 지금 등록되지 않은 id의 기록은 다음 실행에서 바로 해결로 가고, 새 id는 기준값이 없어 첫 실행이 지금 상태를 기준값으로 굳힌다(D7). 꼭 바꿔야 하면 기준값 파일(`baseline/<uid>/<id>.json`)도 새 id로 옮기는 이전을 같이 쓴다. 검사를 지우면 그 기록도 다음 실행에서 해결로 간다(WO-56).
 - 데몬 로그 공개 범위: `Logger` 보간에서 public으로 남기는 값은 checkID·건수·소요 시간·오류 코드·uid뿐이다. 경로·명령 출력·evidence·지문은 기본값(private) 그대로 둔다(다른 사용자가 `log show`로 볼 수 있다, T1).
 - 데몬 연결 수는 `resume()` 전에 올린다. 뒤에 올리면 바로 무효화된 연결이 먼저 줄여 수가 어긋나고 유휴 종료가 걸리지 않는다. 유휴 종료 확인은 세대 번호로 무효화한다(먼저 건 확인이 마지막 끊김 직후에 터지지 않게).
 - 데몬이 유휴 종료(연결 0개 5초 뒤)하는 순간에 들어온 연결은 끊긴다(프로세스 안에서는 막을 수 없다). 앱은 다시 시도해야 하고, 이것을 검증 실패로 세면 안 된다(WO-5).
@@ -1642,6 +1718,17 @@ sequenceDiagram
 | Q70 | `ack`에 어떤 지문을 보낼지 (WO-13) | 문서는 "새 건의 지문"만. 1) 이번 응답 findings의 지문 전부를 저장한 뒤 보냄(0건이면 빈 목록 — Q67), Claude 추천 / 2) 새 건만 — 저장 뒤 ack 전에 앱이 죽으면 그 건은 다음부터 "이미 본 건"이라 영영 ack되지 않아 데몬 pending에 남고 기준값이 확정되지 않음 | 1번 (2026-11-26) — WO-13 3번·3장 시퀀스 반영 |
 | Q71 | `risks.json`에서 읽은 판정·증거를 얼마나 믿을지 (WO-13 1단계 보안 H2 — 실측) | 같은 사용자 권한으로 앱을 죽이고 파일을 바꾸면, 이미 알린 높음을 "낮음·위험 아님"과 공격자 문구("안전한 항목이에요…")로 바꿀 수 있었고 요약 맞추기로 고쳐지지 않았다. 알림 판단은 1번 수정(메모리)으로 막았고, 남은 것은 패널 표시다. 1) 파일에서 읽은 것은 판정을 믿지 않음 — 수준·위험 여부는 규칙 수준으로 되돌리고(LLM이 낮춘 것은 앱이 다시 뜬 뒤 원래 수준으로 보임, 알림은 다시 안 함), 제목·검사·규칙 수준은 요약과 다르면 요약으로 다시 만들고, 증거는 요약의 증거 해시와 맞을 때만 보여 줌(요약에 해시 필드 추가 — XPC 계약 한 필드), Claude 추천 / 2) 1번에서 증거 해시는 빼고 증거 바꿔치기는 한계로 적음(계약 그대로) / 3) 지금처럼 파일을 믿고 한계로 적음 | 1번 (2026-11-27) — WO-13 1단계 반영(`RiskStore`), 요약에 `evidenceHash`(WO-12 계약 한 필드) |
 | Q72 | 기록 파일(`risks.json`)이 지워졌거나 바뀐 것을 알아챘을 때 알릴지 (WO-14) | `loadFailed`이거나 데몬 요약으로 다시 만든 항목이 있으면 기록을 지우려 한 흔적일 수 있다. 1) 패널에 표시하고 고정 문구 알림을 한 번 보냄("Haetae 기록을 읽지 못해 다시 만들었어요" — 앱 업데이트로 형식이 바뀌어도 뜰 수 있어 탓하지 않는 문구), Claude 추천 / 2) 패널에만 표시 | 1번 (2026-11-27) — WO-14 4번 반영 |
+| Q73 | 패널 모양 방향 (WO-53) | 1) macOS 기본 모양 + 26 이상 Liquid Glass·15는 반투명 재질, Claude 추천 / 2) 자체 색과 브랜드 / 3) 기본 모양만 | 2번 (2026-11-27) — 브랜드 색은 Q79 |
+| Q74 | 빌드·패턴 버전·판정 정보를 어디에 (WO-53) | 1) 맨 아래 작은 글씨 한 줄, Claude 추천 / 2) "…" 메뉴 안에만 / 3) 지금처럼 표로 | 1번 (2026-11-27) |
+| Q75 | 위험 항목을 누르면 (WO-53) | 1) 그 자리에서 펼쳐 이유 전체·검사 이름·발견 시각(증거는 숨김), Claude 추천 / 2) 가린 증거도 보임 / 3) 펼치지 않음 | 2번 (2026-11-27) — 증거는 데몬이 가린 글을 `Text(verbatim:)`로, 확인 전 항목은 증거를 숨김(WO-53 4번) |
+| Q76 | 경고에 바로가기 버튼 (WO-53) | 1) 넣음("알림 켜기", "로그인 항목 열기"), Claude 추천 / 2) 글만 | 1번 (2026-11-27) |
+| Q77 | 검사 중 표시 (WO-53) | `ScanController`에 `isScanning`을 더해야 한다. 1) 넣음, Claude 추천 / 2) 안 넣음 | 1번 (2026-11-27) |
+| Q78 | 패널 개선을 언제 (WO-53) | 1) 지금, WO-15 전에 WO-53으로, Claude 추천 / 2) Phase 2가 끝난 뒤 | 1번 (2026-11-27) |
+| Q79 | 브랜드 색 (WO-53, Q73 2번) | 강조에만 쓰고 상태 색(초록·노랑·빨강)과는 따로 둔다. 1) 단청 청록 + 금색 포인트(해태 — 광화문을 지키는 수호신, 차분하고 믿음직), Claude 추천 / 2) 미드나이트 인디고 + 민트(요즘 보안 앱 느낌) / 3) 먹색 + 주홍(강하지만 위험 빨강과 겹침) | 2번 (2026-11-27) — 주황+민트·슬레이트 등 다른 바탕도 견줘 본 뒤 결정(주황은 "중간" 경고색과 겹침) |
+| Q80 | 위험이 났을 때의 화면을 미리 겪어 볼 방법 (WO-54) | 실제 검사(WO-15~18)가 아직 없어 위험 화면을 본 적이 없다. 1) Debug 앱에만 "데모 위험 넣기" 메뉴(앱 안에서만, 30분), Claude 추천 / 2) Debug 데몬에 데모 검사 — 사용자 폴더 표시 파일의 줄마다 위험, 지우면 해결(실제 흐름 그대로, 데몬 코드·root 원장에 데모 기록) | 2번 (2026-11-27) |
+| Q81 | 설정 창 구성 (WO-55) | 설정 창이 빈약하다(사용자). 1) 한 화면에 섹션 4개(검사·시작·알림·정보), Claude 추천 / 2) 탭으로 나눔(일반·알림·정보 — WO-23 모델 설정 탭 자리) / 3) 그대로 두고 글자 색만 | 2번 (2026-11-27) |
+| Q82 | 패널 목록 줄 수(3줄)와 알림·머리 글 건수(2건)가 다름 — 낮음은 위험으로 세지 않음(D10) (WO-53) | 1) 목록을 "위험 N건"과 접힌 "참고 N건"으로 나눔, Claude 추천 / 2) 낮음도 위험으로 세어 알림 / 3) 낮음 줄만 흐리게 | 그대로 둠 (2026-11-27, 사용자 "무시") |
+| Q83 | 지금 돌리지 않는 검사(데모 검사가 없는 Release·지운 검사)의 알림 완료 기록이 30일 남는 문제 (WO-54 설계 리뷰 M1) | 1) 별도 WO로 지금 고침 — 등록되지 않은 검사의 기록은 해결, Claude 추천 / 2) WO-15 이후 검사 정리 때 | 1번 (2026-11-27) — WO-56 |
 
 ## 10. 작업 로그 (append-only)
 
@@ -1951,3 +2038,15 @@ sequenceDiagram
 - 알아낸 것: 알림 등록(`center.add`)과 설정 읽기(`notificationSettings`)는 알림 서버가 멈추면 돌아오지 않아, 기다리는 쪽(파이프라인·검사)이 함께 멈춘다 — 시간 상한을 두고 늦게 끝난 일은 버린다(`Once`). 다른 모듈의 `Sendable` 클로저로 `UNUserNotificationCenter`를 넘기면 Sendable 오류 — `@MainActor` 클로저로 받으면 된다. 메뉴바 아이콘은 템플릿으로 그려져 색이 빠진다(`NSImage` 팔레트 + `isTemplate = false`). 다른 패키지의 `package` 선언은 `@testable import`로 시험한다. 데몬이 정리한 글은 `displaySafe`를 두 번 해도 같다(무작위 24만 건) — 그래서 파일 검사에 그 비교를 쓸 수 있다.
 - 바뀐 결정: Q72 추가·결정(1번), WO-14 본문(`ScanController` 분리, 상태 원인별), WO-19 8-3.
 - 남은 것: WO-15부터. WO-14 실제 화면 확인(7-2 R3·R5·R4·R6 — 새 빌드 설치 뒤 사용자), 7-1 P2 실제 데몬 확인(별도 에이전트, root 소유 사본), Q49(WO-45 전), Q45(WO-16 전), Q40(WO-26 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).
+
+### 2026-11-27 — Claude (WO-53 패널 다시 그리기)
+- 한 일: WO-14 화면을 본 사용자 요청("직관적이고 모던하고 세련된 UI")으로 WO-53을 새로 만들고 Q73~Q79를 물어 정함(자체 브랜드 — 미드나이트 인디고 + 민트, 기술 정보는 맨 아래 한 줄, 위험은 펼쳐 가린 증거까지, 바로가기 버튼, 검사 중 표시, 지금 바로). 패키지에 `WatchState`(아이콘·패널 공용 우선순위)·`PanelHeadline`·`PanelBanner`·`PanelTime`, 앱 `Haetae/Panel/` 7개 파일로 나눠 다시 그림. 저장소 밖 렌더 도구로 10가지 화면을 이미지로 보며 고침. 별도 에이전트 리뷰 2개(설계·보안)와 재리뷰 반영.
+- 알아낸 것: 메뉴바 앱은 현지화가 영어뿐이라 `Locale.current` 시각이 "11:38 AM" — 화면 글이 한국어면 시각도 `ko_KR`로 고정. 시스템 진행 막대·링크 버튼은 창이 앞에 없으면 회색이 되거나 강조색을 따라가 브랜드 색이 안 나온다 — 직접 그림. `NSColor(name:dynamicProvider:)` 클로저는 AppKit이 아무 스레드에서나 부르므로 MainActor 기본 격리 타깃에서는 `nonisolated` 함수 안에서 만든다. SwiftUI 하위 뷰가 값만 받으면 저장소 밖 SwiftPM 실행 파일에 같은 파일을 복사해 `NSHostingView` + `cacheDisplay`로 그려 볼 수 있다(`ImageRenderer`는 AppKit 컨트롤을 못 그림, `NSBitmapImageRep.draw(in:)`은 copy 합성이라 바탕이 지워짐 — `.sourceOver`로). 확인 판정을 그릴 때마다 저장소에서 따로 읽으면 목록 스냅숏과 어긋나 심은 증거가 "확인됨"으로 보일 수 있다.
+- 바뀐 결정: Q73~Q79 추가·결정, WO-53 추가(Phase 2), `DaemonStatus.isProblem` 삭제(→ `WatchState`), `ScanController.isVerified` 삭제(→ `verifiedFingerprints`), 실패한 검사도 "살펴볼 것", WO-19 8-4.
+- 남은 것: WO-15부터. WO-53·WO-14 실제 화면 확인(7-2 R3·R5·R4·R6 — 새 빌드 설치 뒤 사용자), 7-1 P2 실제 데몬 확인(별도 에이전트, root 소유 사본), Q49(WO-45 전), Q45(WO-16 전), Q40(WO-26 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).
+
+### 2026-11-27 — Claude (WO-54·55·56 데모 검사·설정 창·지운 검사 기록)
+- 한 일: 위험 화면을 겪어 보고 싶다는 사용자 요청으로 Q80(Debug 데몬 데모 검사)·Q81(설정 창 탭)·Q82(목록 줄 수와 알림 건수 차이는 그대로)·Q83(지운 검사 기록 해결)을 물어 정하고 WO-54·55·56을 만듦. WO-54 — `HaetaeChecks/Debug/DemoRiskCheck.swift`(`#if DEBUG`, 사용자 파일 `demo-risks.txt`의 줄마다 위험), WO-55 — `SettingsView` 탭(일반·알림·정보), WO-56 — `FindingLedger.forgetChecks`(지금 등록되지 않은 검사의 알림 완료 건은 해결, pending은 버리고 그 기준값도 치움, `checkRetired` 기록). 사용자 화면 확인으로 패널도 다듬음(카드·버튼 대비, 메뉴바 방패 16pt, 남은 시간 반올림, 설정 메뉴 글자 색, 위험 3건까지 스크롤 없이). 별도 에이전트 리뷰 2개(설계·보안)와 재리뷰를 각 WO마다 반영.
+- 알아낸 것: `Notifier.withDeadline`이 일이 끝난 뒤에도 5초 타이머를 멈추지 않아 검사마다 "알림 서버 응답 없음"이 잘못 찍혔다(usernoted 로그로 바로 답한 것을 확인 — 상태 값은 맞았음). 메뉴바 창 안의 `ScrollView`는 스스로 높이를 못 잡아 작게 접힌다 — 줄 높이를 재서(`onGeometryChange`) 정해 준다. 뷰 갈래(`if`)가 바뀌면 줄이 새로 만들어져 줄 안 `@State`가 풀린다 — 펼침 상태는 목록 쪽 집합으로. `"\r\n"`은 Swift에서 한 글자라 `"\n"`으로 나누면 줄이 합쳐진다(`whereSeparator: \.isNewline`). SwiftPM 패키지를 Xcode Release로 빌드하면 `DEBUG`가 꺼져 `#if DEBUG` 파일이 빠진다(`strings`로 확인). 해결 판정이 "이번에 성공한 검사"만 보면 지운 검사의 기록은 30일 남는다.
+- 바뀐 결정: Q80~Q83 추가·결정, WO-54·55·56 추가(Phase 2), 8장 "검사 id는 바꾸지 않는다", WO-44 추가 지시(배포본에 데모 검사 없는지), WO-19 8-5, `LedgerEvent.checkRetired`.
+- 남은 것: WO-15부터. WO-54 데모 검사는 실제 검사가 들어오면 지운다. 7-2 R3·R5·R4·R6(실제 검사로), 7-1 P2 실제 데몬 확인(별도 에이전트, root 소유 사본), Q49(WO-45 전), Q45(WO-16 전), Q40(WO-26 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).

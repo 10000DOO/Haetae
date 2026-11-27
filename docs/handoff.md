@@ -1,6 +1,6 @@
 # 다음 세션 시작 프롬프트
 
-> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-27 (WO-14 완료 시점)
+> 새 세션에서 아래 코드 블록 내용을 그대로 붙여 넣는다. 갱신: 2026-11-27 (WO-56 완료 시점)
 
 ```
 Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 루트
@@ -12,11 +12,11 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 1. docs/haetae-security-monitor.md — 단일 진실 소스(SSOT, 약 380KB). 처음부터 끝까지 읽지 말고 `rg -n`으로 찾아서:
    - 맨 위 헤더(상태·다음 액션), 0장(문서 규칙), 8장(주의사항)
    - 지금 할 WO(6장 "### WO-N")와 그 WO가 가리키는 3-3 결정(D#), XPC 관련이면 3-7
-   - 필요할 때만 1-1(요구사항 R1~R19), 3-1·3-2(다이어그램), 3-5(감시 대상), 7장(검증), 9장(Q1~Q72)
+   - 필요할 때만 1-1(요구사항 R1~R19), 3-1·3-2(다이어그램), 3-5(감시 대상), 7장(검증), 9장(Q1~Q83)
 2. 참고 자료는 필요할 때만: docs/research/ (extra-security-checks.md, llm-candidates.md, security-threat-review.md, dev-tools.md)
 
 ## 현재 상태 (2026-11-27)
-- 문서 상태 `구현중`. WO-1~14·WO-47~52 `[x]`, WO-15~46 `[ ]`.
+- 문서 상태 `구현중`. WO-1~14·WO-47~56 `[x]`, WO-15~46 `[ ]`.
   - Phase 1(WO-1~7): 패키지 연결, `HaetaeShared` XPC 계약, 앱 번들 구성, 데몬 뼈대, 앱 뼈대, 단위 테스트 43개, XPC 거부 확인 도구(`Tools/xpc-probe/`).
   - Phase 2에서 끝난 것(모두 별도 에이전트 리뷰 반영, 단위 테스트는 WO-19):
     - WO-8 `CommandRunner` — 셸 없이 SIP 경로의 시스템 볼륨 파일만 실행. stdin 입력과 "자기 실행 파일(cdhash 요구사항)" 허용은 해석 서비스가 쓴다.
@@ -28,17 +28,19 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
     - WO-12 `CollectCoordinator`·`DaemonLifecycleState`·`SelfIntegrityCheck`(`HaetaeChecks/Engine/`), `SelfIdentity`·`BundleIntegrity`(`HaetaeShared` — 앱·데몬·해석 서비스 공용), 데몬 `DaemonConfiguration`·`ListenerDelegate`·`CollectService` — XPC 4개 메서드 완성. 판단은 패키지(테스트 가능, Q23), 데몬 타깃은 어댑터·타이머·`exit`만. WO-13이 쓸 때 꼭 알 것: 앱은 `collect`마다 ack한다(새 건이 없으면 빈 목록 — 데몬은 ack로만 검사 공백 표시를 지움, Q67), `CollectResult.notified`가 nil이면 "이번엔 안 보냄"(가진 패널 유지), `HaetaeXPCError.rateLimited`(20초 안 재요청)·`updating`(옛 데몬, 연결을 놓고 다시)은 `DaemonClient`가 처리한다, `AppState.connect()`가 지금 `collect` 결과의 `scanGap`·`resolved`를 버리니 파이프라인으로 넘긴다. 설계·리뷰 경과는 6장 WO-12.
     - WO-13 `ScanPipeline`·`ScanScheduler`·`RiskStore`·`AppSettings`·`RuleOnlyJudge`·`ReconnectPolicy`(`HaetaeAppCore/`) — 앱 쪽 순수 로직. WO-14가 쓸 때 꼭 알 것: 알릴지·ack할지는 `ScanPipeline` 메모리로만 정한다(`risks.json`은 사용자가 바꿀 수 있는 보기용 캐시 — 파일에서 읽은 판정은 규칙 수준으로 되돌리고 데몬 요약과 대조, Q71). 순서는 저장 → 알림 → commit → ack(바꾸지 않는다). 설정 화면은 `ScanScheduler`(`setInterval`·`pause`·`resume`)를 부른다(`AppSettings`의 바꾸는 함수는 `package`). `DaemonClient`가 `FindingSource`를 채택할 때 메서드마다 `@MainActor`, `ack`에 시간 상한. `AppState.connect()`의 `collect`도 파이프라인을 거치게. 설계·리뷰 경과는 6장 WO-13.
     - WO-14 앱 화면·알림 연결 — `ScanController`(검사 상태와 조작, 파이프라인·스케줄러 조립)와 `AppState`(데몬 수명)로 나눔, `DaemonClient`가 `FindingSource`·`PatternInstaller`, `Notifier`(고정 문구, 5초 상한), `MenuBarIcon`·`PanelView`·`SettingsView`. 판단은 패키지(`DaemonStatus`·`StatusIcon`·`CollectFailureAction`, `HaetaeAppCore/DaemonStatus.swift`), 화면은 그리기만. 이어서 쓸 때 꼭 알 것: 탐지에서 온 글은 `Text(verbatim:)`, 알림 본문은 고정 문구만(D12), 상태를 더하면(WO-43) `isProblem`·`StatusIcon`의 switch를 컴파일러가 알려 준다, WO-22는 `ScanController.init`의 `judgeProvider` 자리와 `ScanPipeline.verified`에 붙인다. 실제 화면은 아직 못 봤다(아래 "이 맥"). 설계·리뷰 경과는 6장 WO-14.
+    - WO-53 패널 다시 그리기(사용자 요청) — 브랜드 미드나이트 인디고 + 민트(Q79). 판단은 패키지 `WatchState`(메뉴바 아이콘과 패널 머리 공용 우선순위)·`PanelHeadline`·`PanelBanner`·`PanelTime`, 화면은 `Haetae/Panel/`(하위 뷰는 값만 받음 — 저장소 밖 렌더 도구로 이미지 확인). 이어서 쓸 때 꼭 알 것: 새 상태·배너는 패키지에서 더하고 임시 테스트로 지킨다, 탐지 글은 `Text(verbatim:)`, 확인 전 항목은 증거를 숨긴다(`ScanController.verifiedFingerprints`는 `risks`와 같은 때에만 바꾼다), 시각은 `PanelTime`(한국어 고정). WO-23은 `ScanController.judgeName`에 모델 상태를 넣는다(패널 맨 아래 줄·설정 정보 탭이 함께 씀). 설계·리뷰 경과는 6장 WO-53.
+    - WO-54 Debug 전용 데모 검사(`HaetaeChecks/Debug/DemoRiskCheck.swift`, `#if DEBUG`) — `~/Library/Application Support/Haetae/demo-risks.txt`에 `high|medium|low 제목` 줄을 쓰면 위험이 나고 지우면 해결된다. 실제 검사가 들어오면 지운다. WO-55 설정 창 탭(일반·알림·정보 — WO-23 모델 탭 자리). WO-56 지금 등록되지 않은 검사의 원장 기록은 다음 실행에서 해결(`FindingLedger.forgetChecks`) — 검사 id는 바꾸지 않는다(8장).
 - Phase 1 검증: 7-1은 별도 에이전트가 끝냈다(구현 결함 0건). 남은 것은 사용자 확인뿐이다.
   - 7-2 R16(XPC 거부 결과를 받아들이는지) — 사용자 답 대기
   - 로그아웃 뒤 자동 실행(7-2 R2·R12, 7-1 P1 "등록 흐름"의 로그아웃 항목) — 사용자가 로그아웃했다고 하면 그 시각의 데몬 로그에 `markUserQuit`이 있는지 본다
   - "끄면 다음 로그인 때 안 뜬다"는 사용자 결정으로 건너뜀. "검증 실패 표시"는 Phase 6로 옮김.
   - 사용자 지시로 이 확인들을 남긴 채 Phase 2를 진행 중이다.
-- 정해진 결정(9장 Q41~Q72, 본문 반영 끝): 기록 파일을 다시 만들면 패널 표시 + 고정 문구 알림 한 번(Q72), `risks.json`이 지워지면 요약으로 되살림·요약에 없으면 해결(Q69), ack는 이번 응답의 지문 전부·0건이면 빈 목록(Q70), 파일에서 읽은 판정은 믿지 않고 요약·증거 해시와 대조(Q71), 앱 `collect` 대기는 검사 상한 × 2 + 5초(Q63), ack한 위험 요약은 `collect` 응답에(Q64), 30일 정리는 데몬이 뜬 뒤 첫 `collect` 전·하루마다(Q65), 검증 실패 연결은 1분에 한 줄로 묶음(Q66 — 비정상 종료도 같게), 검사 공백은 ack로만 지움(Q67), `highest-build`를 못 읽으면 그 실행만 fail-open(Q68), 일부만 본(`partial`)·사용자를 모르는 실행은 `since`를 묶고 기준값은 첫 실행이면 확정(Q57·Q62), 실패·`partial`·시간 미룸은 최근 5번 중 3번이면 한 단계 올림(Q58·Q62), 취소에 안 응하는 검사는 기다리고 WO-19에서 시험(Q59), `SecretMasker`의 과잉 가림은 WO-16에서(Q60), 가린 흔적이 있으면 LLM이 수준을 못 낮춤(Q61, WO-22), 해석 자식은 샌드박스에(Q56), 사용자 파일도 링크 수를 보지 않음(Q46), 해석은 별도 프로그램으로(Q42·Q48 2번·Q54 1번), 기준값은 사용자별(Q50), 위험 항목은 기준값에 넣지 않음(Q51), pending이 넘치면 낮은 수준의 새 것부터 버림(Q52), 알림 완료 사본을 데몬이 보관해 다시 보냄(Q53), pending 기준값 장치는 유지(Q55).
+- 정해진 결정(9장 Q41~Q83, 본문 반영 끝): Debug 데몬 데모 검사(Q80), 설정 창 탭(Q81), 목록 줄 수와 알림 건수 차이는 그대로(Q82), 지운 검사 기록은 해결(Q83), 패널은 자체 브랜드(인디고 + 민트)·기술 정보 맨 아래 한 줄·위험 펼쳐 가린 증거까지·바로가기·검사 중 표시(Q73~Q79), 기록 파일을 다시 만들면 패널 표시 + 고정 문구 알림 한 번(Q72), `risks.json`이 지워지면 요약으로 되살림·요약에 없으면 해결(Q69), ack는 이번 응답의 지문 전부·0건이면 빈 목록(Q70), 파일에서 읽은 판정은 믿지 않고 요약·증거 해시와 대조(Q71), 앱 `collect` 대기는 검사 상한 × 2 + 5초(Q63), ack한 위험 요약은 `collect` 응답에(Q64), 30일 정리는 데몬이 뜬 뒤 첫 `collect` 전·하루마다(Q65), 검증 실패 연결은 1분에 한 줄로 묶음(Q66 — 비정상 종료도 같게), 검사 공백은 ack로만 지움(Q67), `highest-build`를 못 읽으면 그 실행만 fail-open(Q68), 일부만 본(`partial`)·사용자를 모르는 실행은 `since`를 묶고 기준값은 첫 실행이면 확정(Q57·Q62), 실패·`partial`·시간 미룸은 최근 5번 중 3번이면 한 단계 올림(Q58·Q62), 취소에 안 응하는 검사는 기다리고 WO-19에서 시험(Q59), `SecretMasker`의 과잉 가림은 WO-16에서(Q60), 가린 흔적이 있으면 LLM이 수준을 못 낮춤(Q61, WO-22), 해석 자식은 샌드박스에(Q56), 사용자 파일도 링크 수를 보지 않음(Q46), 해석은 별도 프로그램으로(Q42·Q48 2번·Q54 1번), 기준값은 사용자별(Q50), 위험 항목은 기준값에 넣지 않음(Q51), pending이 넘치면 낮은 수준의 새 것부터 버림(Q52), 알림 완료 사본을 데몬이 보관해 다시 보냄(Q53), pending 기준값 장치는 유지(Q55).
 - 미정인 결정 (지금 작업은 막지 않는다):
   - Q49(launchd가 바꿔치기된 데몬·해석 서비스를 띄우는 경우 — `SpawnConstraint`) — WO-45 전.
   - Q45(`/private/var/at/jobs`가 daemon 소유) — WO-16 전.
   - Q40(`launchctl asuser`가 uid를 바꾸지 않음) — WO-26 전.
-- 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다(2026-11-24 WO-52 빌드 — 해석 서비스까지 등록됨, 전체 디스크 접근 목록에 Haetae가 켜져 있다). 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다. WO-14 화면(메뉴바 아이콘·패널·알림)도 아직 옛 빌드라 새 빌드를 설치해야 보인다(7-2 R3·R5·R4·R6 — 빌드 폴더 앱은 띄우지 않는다: 단일 실행 규칙과 알림 권한 창).
+- 이 맥: `/Applications/Haetae.app`에 개발용 Debug 사본이 root 소유로 설치돼 있고 데몬·에이전트가 등록·승인돼 있다(2026-11-24 WO-52 빌드 — 해석 서비스까지 등록됨, 전체 디스크 접근 목록에 Haetae가 켜져 있다). 앱이 켜져 있을 수 있다(`pgrep -lx Haetae`). 데몬 쪽 코드를 바꾼 뒤 실제 동작을 보려면 사용자가 8장의 sudo 복사 명령을 다시 실행해야 한다. WO-14·53 화면(메뉴바 아이콘·패널·알림)은 새 빌드를 설치해야 보인다(7-2 R3·R5·R4·R6 — 빌드 폴더 앱은 띄우지 않는다: 단일 실행 규칙과 알림 권한 창).
 - 서명: 세 타깃(`Haetae`·`haetaed`·`haetae-parser`) Apple Development, Personal Team 47XT7DPDLP. hardened runtime 켜짐.
 - 도구: swift-lsp 플러그인 + buildServer.json, codegraph 인덱스(.codegraph/), Peekaboo MCP, 스킬 write-swift·swift-testing-expert·swiftui-expert-skill·swift-concurrency·paseo-handoff·reviewer. Paseo 데몬이 꺼져 있으면 `paseo daemon start --home ~/.paseo`. MCP 도구가 없으면 CLI로: `paseo run --no-wait -q --provider claude/claude-opus-5-5 --mode auto --thinking xhigh --cwd <저장소> "$(cat 프롬프트)"`, 이어 보내기 `paseo send --no-wait --prompt-file <파일> <id>`(닫힌 에이전트도 맥락 유지), 기다리기 `paseo wait <id>`(백그라운드), 결과 `paseo logs <id>`.
 - git: main이 origin/main에 push돼 있다(public 저장소). 커밋 이메일은 저장소 로컬 설정(개인 이메일)이라 바꾸지 않는다.
@@ -60,6 +62,6 @@ Haetae 프로젝트 이어서 작업해줘. 작업 디렉터리: 이 저장소 �
 
 ## 다음 할 일
 1. WO-15~18(검사). 처음 픽스처를 넣는 WO-15가 `Package.swift`에 `resources: [.copy("Fixtures")]`를 넣는다(6장 "검사 WO 공통").
-2. 그다음 WO-19(테스트 — 별도 에이전트, WO-11·12·13·14 임시 테스트 시나리오는 WO-19 6-1·8-1·8-2·8-3번). Phase 2를 닫을 때 7-1 P2는 실제 데몬(root 소유 사본, Q33)으로 별도 에이전트가 확인한다.
+2. 그다음 WO-19(테스트 — 별도 에이전트, WO-11·12·13·14·53·54·56 임시 테스트 시나리오는 WO-19 6-1·8-1~8-5번). Phase 2를 닫을 때 7-1 P2는 실제 데몬(root 소유 사본, Q33)으로 별도 에이전트가 확인한다.
 `CommandRunner`·`SafeFileReader`·`UserDirectory`·`IsolatedParser`·저장소·`CheckRunner`·`CollectCoordinator`·`ScanPipeline`을 쓸 때 주의할 점은 8장과 6장 WO-11·12·13에 있다(`/private/…` 경로, `UserRecord.root`와 `.rootOnly`, 검사 안에서 병렬로 읽지 않기, `UserRecord` 직접 만들지 않기, `parse`는 한 번에 하나씩, 해석 자식 안에서는 파일·로캘이 필요한 API 금지, `unavailable`은 검사 실패 1건·`failed`는 파일별 Finding, "검사를 쓸 때(WO-11)", ack 확정·정리는 `CollectCoordinator`가 `CheckRunner`로만, 파이프라인 순서 등). 사용자가 R16이나 로그아웃 결과를 알려 주면 7-2에 기입한다(R16은 "7-1 XPC 거부 결과를 받아들이는지", 로그아웃은 그 시각 데몬 로그의 `markUserQuit` 확인).
 ```
