@@ -1,4 +1,5 @@
 import Foundation
+import HaetaeAppCore
 import HaetaeShared
 import os
 import Synchronization
@@ -34,8 +35,6 @@ final class DaemonClient {
     /// 같은 실행의 결과를 받는다(데몬이 같은 uid 요청을 합친다).
     private static let collectTimeout: Duration = HaetaeLimits.maxRunDuration * 2 + .seconds(5)
     private static let quitTimeout: Duration = .seconds(2)
-    /// 무효화된 뒤 다시 시도하기 전에 기다리는 시간. 옛 데몬이 꺼지고 새 데몬이 뜰 시간을 준다(D20).
-    private static let retryDelays: [Duration] = [.seconds(5), .seconds(15), .seconds(30)]
 
     private let identity: AppIdentity
     private var connection: NSXPCConnection?
@@ -46,56 +45,64 @@ final class DaemonClient {
         self.identity = identity
     }
 
+    /// 재시도·재실행 판단은 `ReconnectPolicy`가 한다. 여기서는 XPC 호출과 결과 분류만 한다.
     func collect() async throws -> CollectResult {
-        var sawVerificationFailure = false
-        var waitedForRateLimit = false
-        for delay in [Duration.zero] + Self.retryDelays {
-            if delay > .zero { try await Task.sleep(for: delay) }
-            // Release에서는 빌드가 다르면 서명 요구사항 때문에 응답이 오지 않는다. 응답 대신 디스크의 자기 빌드를 본다.
-            if diskBuild() > identity.build { throw DaemonClientError.needsRelaunch }
-            let data: Data
+        var state = ReconnectPolicy.State()
+        var wait: Duration = .zero
+        while true {
+            if wait > .zero { try await Task.sleep(for: wait) }
+            if ReconnectPolicy.shouldRelaunch(diskBuild: diskBuild(), running: identity.build) { throw DaemonClientError.needsRelaunch }
+            var data: Data?
+            var daemonError: HaetaeXPCError?
+            var attempt: ReconnectPolicy.Attempt
             do {
                 data = try await call(timeout: Self.collectTimeout) { proxy, once in
                     proxy.collect { data, error in
                         once.resume(with: data.map(Result.success) ?? .failure(Self.decode(error)))
                     }
                 }
+                attempt = .reply(headerBuild: nil)
             } catch HaetaeXPCError.updating {
-                // 옛 데몬이 곧 끝난다. 연결을 놓아야 끝날 수 있다(D20).
+                // 마지막 시도라 다시 하지 않더라도 놓는다 — 연결을 쥐고 있으면 옛 데몬이 끝나지 못한다.
                 dropConnection()
-                continue
-            } catch HaetaeXPCError.rateLimited where !waitedForRateLimit {
-                // 방금 다시 뜬 앱처럼 이 사용자의 검사가 막 시작됐다. 간격이 지나면 한 번 더 묻는다.
-                waitedForRateLimit = true
-                try await Task.sleep(for: HaetaeLimits.minCollectInterval)
-                continue
+                attempt = .updating
+            } catch HaetaeXPCError.rateLimited {
+                daemonError = .rateLimited
+                attempt = .rateLimited
             } catch let error as HaetaeXPCError {
-                throw error
+                daemonError = error
+                attempt = .daemonError
             } catch {
                 // 무효화·중단·타임아웃. 데몬이 유휴 종료하는 순간과 겹쳐도 여기로 온다.
                 let nsError = error as NSError
                 Log.app.error("collect 실패 (\(nsError.domain, privacy: .public) \(nsError.code))")
-                if nsError.domain == NSCocoaErrorDomain,
-                   [NSXPCConnectionInvalid, NSXPCConnectionCodeSigningRequirementFailure].contains(nsError.code) {
-                    sawVerificationFailure = true
-                }
-                continue
+                attempt = .noReply(signature: nsError.domain == NSCocoaErrorDomain
+                    && [NSXPCConnectionInvalid, NSXPCConnectionCodeSigningRequirementFailure].contains(nsError.code))
             }
             #if DEBUG
-            // Debug 요구사항에는 빌드 조건이 없어서 다른 빌드의 데몬과도 연결된다.
-            let daemonBuild = try CollectResult.decodeHeader(data).daemonBuild
-            if daemonBuild > identity.build { throw DaemonClientError.needsRelaunch }
-            if daemonBuild < identity.build {
-                // 등록된 데몬(root 사본)이 이 앱보다 옛 빌드다. 다시 시도해도 launchd는 같은 옛 파일을 띄우니 바로 끝낸다. 연결을 놓기
-                // 전에 사용자 종료로 알린다 — 그냥 끊으면 데몬이 비정상 종료와 검사 공백으로 적는다.
+            // Debug 요구사항에는 빌드 조건이 없어서 다른 빌드의 데몬과도 연결된다. 머리를 읽지 못하면 형식 오류로 바로 올린다.
+            if let data { attempt = .reply(headerBuild: try CollectResult.decodeHeader(data).daemonBuild) }
+            #endif
+            switch ReconnectPolicy.next(after: attempt, running: identity.build, state: &state) {
+            case .accept:
+                guard let data else { throw HaetaeXPCError.internalError }
+                return try CollectResult.decodeValidated(data)
+            case .relaunch:
+                throw DaemonClientError.needsRelaunch
+            case .staleDaemon:
+                // 그냥 끊으면 데몬이 비정상 종료와 검사 공백으로 적는다.
                 await markUserQuit()
                 dropConnection()
                 throw DaemonClientError.staleDaemon
+            case .retry(let after, let drop):
+                if drop { dropConnection() }
+                wait = after
+            case .rethrow:
+                throw daemonError ?? HaetaeXPCError.internalError
+            case .giveUp(let verificationFailed):
+                throw verificationFailed ? DaemonClientError.verificationFailed : DaemonClientError.noResponse
             }
-            #endif
-            return try CollectResult.decodeValidated(data)
         }
-        throw sawVerificationFailure ? DaemonClientError.verificationFailed : DaemonClientError.noResponse
     }
 
     /// 사용자가 끄거나 의도해서 다시 뜰 때만 부른다. 데몬이 비정상 종료로 기록하지 않게 한다(D28).

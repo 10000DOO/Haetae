@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HaetaeShared
 
 /// Finding의 식별자(D18). 같은 위험이면 실행할 때마다 같은 값이고, 내용이 바뀌면 다른 값이다.
 public enum Fingerprint {
@@ -26,9 +27,4 @@ public enum Fingerprint {
         }
         return "/" + parts.joined(separator: "/")
     }
-}
-
-/// 소문자 hex. `String(format:)`은 strict memory safety에서 unsafe라 쓰지 않는다.
-func lowercaseHex(_ bytes: some Sequence<UInt8>) -> String {
-    bytes.map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined()
 }

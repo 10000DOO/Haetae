@@ -1,4 +1,5 @@
 import AppKit
+import HaetaeAppCore
 import HaetaeShared
 import Observation
 import os
@@ -16,7 +17,6 @@ enum DaemonStatus: Equatable {
 @Observable
 @MainActor
 final class AppState {
-    private static let maxRelaunches = 3
     private static let approvalPollInterval: Duration = .seconds(3)
 
     private(set) var daemonStatus: DaemonStatus = .connecting
@@ -168,12 +168,10 @@ final class AppState {
         guard let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) else { return }
         let key = "relaunchCount.\(build)"
         let count = UserDefaults.standard.integer(forKey: key)
-        // launchd가 띄운 인스턴스가 아니면 아무도 다시 띄우지 않는다.
-        guard registrar.launchedByAgent, registrar.isAgentRegistered, count < Self.maxRelaunches else {
+        guard ReconnectPolicy.mayRelaunch(launchedByAgent: registrar.launchedByAgent, agentRegistered: registrar.isAgentRegistered, relaunchCount: count) else {
             daemonStatus = .error("다시 실행 필요")
             return
         }
-        // 횟수를 메모리에만 두면 재실행마다 0이 돼 끝없이 반복한다.
         UserDefaults.standard.set(count + 1, forKey: key)
         await client?.markUserQuit()
         exit(ServiceRegistrar.relaunchExitCode)

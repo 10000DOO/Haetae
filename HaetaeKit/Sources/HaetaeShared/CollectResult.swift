@@ -29,13 +29,16 @@ public struct CollectResult: Codable, Sendable, Equatable {
     }
 }
 
-/// 알림 완료 건의 요약. evidence는 뺀다 — 2,000건을 통째로 보내면 응답 한도를 넘는다(Q53).
+/// 알림 완료 건의 요약. evidence는 빼고 해시만 싣는다 — 2,000건을 통째로 보내면 응답 한도를 넘는다(Q53). 앱은 해시로 자기 기록의
+/// 증거가 바뀌지 않았는지 본다(Q71).
 public struct NotifiedSummary: Codable, Sendable, Equatable {
     public var fingerprint: String
     public var checkID: String
     public var title: String
     public var ruleLevel: RiskLevel
     public var observedAt: Date
+    /// `Finding.evidenceHash(evidence)`.
+    public var evidenceHash: String
 
     public init(_ finding: Finding) {
         fingerprint = finding.fingerprint
@@ -43,6 +46,7 @@ public struct NotifiedSummary: Codable, Sendable, Equatable {
         title = finding.title
         ruleLevel = finding.ruleLevel
         observedAt = finding.observedAt
+        evidenceHash = Finding.evidenceHash(finding.evidence)
     }
 }
 
@@ -110,7 +114,8 @@ extension CollectResult {
                 guard Finding.isCheckID(summary.checkID),
                       summary.title.unicodeScalars.count <= HaetaeLimits.maxTitleChars,
                       Self.observedAtRange.contains(summary.observedAt.timeIntervalSince1970),
-                      Finding.isFingerprint(summary.fingerprint), seenNotified.insert(summary.fingerprint).inserted
+                      Finding.isFingerprint(summary.fingerprint), Finding.isFingerprint(summary.evidenceHash),
+                      seenNotified.insert(summary.fingerprint).inserted
                 else { throw .invalidField("notified") }
             }
         }

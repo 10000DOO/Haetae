@@ -534,17 +534,6 @@ public actor CheckRunner {
     }
 }
 
-extension RiskLevel {
-    /// 버리거나 자를 때의 순서(높을수록 남긴다).
-    var rank: Int {
-        switch self {
-        case .low: 0
-        case .medium: 1
-        case .high: 2
-        }
-    }
-}
-
 extension Finding {
     /// 보낼 것을 자를 때의 순서(검사별 상한, 응답 한도): 수준이 높은 것 → 먼저 잡힌 것(`observedAt`은 원장이 처음 본 시각으로 지킨다)
     /// → 지문. pending을 버릴 때(Q52)와 같은 원칙이다 — 뒤에 쏟아낸 건이 먼저 잡힌 탐지를 계속 밀어내지 못하게.

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HaetaeShared
 import Synchronization
 
 public enum SafeFileError: Error, Equatable {
