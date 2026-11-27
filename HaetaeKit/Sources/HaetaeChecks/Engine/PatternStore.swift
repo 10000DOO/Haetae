@@ -29,6 +29,24 @@ public enum JSONValue: Sendable, Equatable, Decodable {
     }
 }
 
+extension JSONValue {
+    /// 사전의 값. 사전이 아니거나 키가 없으면 nil.
+    subscript(key: String) -> JSONValue? {
+        if case .object(let object) = self { object[key] } else { nil }
+    }
+
+    /// 문자열 배열. 문자열이 아닌 항목이 하나라도 있으면 nil(팩을 잘못 만든 것).
+    var strings: [String]? {
+        guard case .array(let values) = self else { return nil }
+        let strings = values.compactMap { if case .string(let string) = $0 { string } else { nil } }
+        return strings.count == values.count ? strings : nil
+    }
+
+    var number: Double? {
+        if case .number(let value) = self { value } else { nil }
+    }
+}
+
 public struct PatternPack: Sendable, Equatable, Decodable {
     public static let supportedFormatVersion = 1
 

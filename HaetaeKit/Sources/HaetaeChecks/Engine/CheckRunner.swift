@@ -288,7 +288,8 @@ public actor CheckRunner {
                 } else {
                     okKeys.append(partialKey)
                 }
-                if user == nil || (result.partial && !firstRun) { keepBaseline.insert(check.id) }
+                // 합친 기준값 표시는 `partial`에만 — 사용자를 모르면 사용자 부분을 통째로 못 본 것이라 저장하지 않는다(WO-15 설계 재리뷰 L2).
+                if user == nil || (result.partial && !firstRun && !result.baselineKeepsUnseen) { keepBaseline.insert(check.id) }
                 if user == nil || result.partial {
                     unseen.insert(check.id)
                 } else {

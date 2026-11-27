@@ -1,0 +1,9 @@
+Daemon response: {
+    SecurityInfo =     {
+        AuthenticatedRootVolumeEnabled = 1;
+        SecureBoot =         {
+            SecureBootLevel = full;
+        };
+        SystemIntegrityProtectionEnabled = 1;
+    };
+}

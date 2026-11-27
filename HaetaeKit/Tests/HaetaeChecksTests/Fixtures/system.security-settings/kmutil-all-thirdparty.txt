@@ -1,0 +1,7 @@
+    3  222 0                  0          0          com.apple.kpi.bsd (27.0.0) F7EE797E-8499-3B77-B4E1-D4CEFFECF80B <>
+    4   12 0                  0          0          com.apple.kpi.dsep (27.0.0) F7EE797E-8499-3B77-B4E1-D4CEFFECF80B <>
+    5  249 0                  0          0          com.apple.kpi.iokit (27.0.0) F7EE797E-8499-3B77-B4E1-D4CEFFECF80B <>
+    6  251 0                  0          0          com.apple.kpi.libkern (27.0.0) F7EE797E-8499-3B77-B4E1-D4CEFFECF80B <>
+    7  235 0                  0          0          com.apple.kpi.mach (27.0.0) F7EE797E-8499-3B77-B4E1-D4CEFFECF80B <>
+  250    0 0xfffffe0007d2c000 0x4000     0x4000     com.example.driver (1.2.3) 11111111-2222-3333-4444-555555555555 <5 3>
+  251    0 0xfffffe0007d30000 0x4000     0x4000     com.apple.fake.driver (9.9) 66666666-7777-8888-9999-000000000000 <5 3>

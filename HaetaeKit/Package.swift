@@ -25,7 +25,7 @@ let package = Package(
         .target(name: "HaetaeChecks", dependencies: ["HaetaeShared"], swiftSettings: settings),
         .target(name: "HaetaeAppCore", dependencies: ["HaetaeShared"], swiftSettings: settings),
         .testTarget(name: "HaetaeSharedTests", dependencies: ["HaetaeShared"], swiftSettings: settings),
-        .testTarget(name: "HaetaeChecksTests", dependencies: ["HaetaeChecks", "HaetaeShared"], swiftSettings: settings),
+        .testTarget(name: "HaetaeChecksTests", dependencies: ["HaetaeChecks", "HaetaeShared"], resources: [.copy("Fixtures")], swiftSettings: settings),
         .testTarget(name: "HaetaeAppCoreTests", dependencies: ["HaetaeAppCore", "HaetaeShared"], swiftSettings: settings),
     ]
 )

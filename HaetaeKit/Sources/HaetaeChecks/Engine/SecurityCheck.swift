@@ -21,10 +21,14 @@ public struct CheckResult: Sendable {
     public var newBaseline: Data?
     /// 보지 못한 것이 있다(파일 해석 실패 등). 안 보인 Finding을 해결된 것으로 보내지 않는다.
     public var partial: Bool
+    /// `newBaseline`이 보지 못한 부분의 옛 값을 그대로 옮겨 합친 것이다. 그러면 `partial`이어도 기준값을 저장한다(호출 사용자를 모를 때는 아니다) —
+    /// 한 항목을 계속 못 읽는 동안 나머지 기준값이 묶이지 않게(WO-15). 해결 판정과 `lastSuccess`는 그대로 `partial` 규칙을 따른다.
+    public var baselineKeepsUnseen: Bool
 
-    public init(findings: [Finding], newBaseline: Data? = nil, partial: Bool = false) {
+    public init(findings: [Finding], newBaseline: Data? = nil, partial: Bool = false, baselineKeepsUnseen: Bool = false) {
         self.findings = findings
         self.newBaseline = newBaseline
         self.partial = partial
+        self.baselineKeepsUnseen = baselineKeepsUnseen
     }
 }

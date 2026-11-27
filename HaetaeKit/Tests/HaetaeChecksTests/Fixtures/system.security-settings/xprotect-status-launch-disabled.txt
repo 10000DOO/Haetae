@@ -1,0 +1,2 @@
+XProtect launch scans: disabled
+XProtect background scans: enabled
