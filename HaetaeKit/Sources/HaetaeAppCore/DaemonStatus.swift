@@ -35,49 +35,22 @@ public enum DaemonStatus: Equatable, Sendable {
 }
 
 extension DaemonStatus {
-    /// 감시가 돌지 않는 문제라 사용자가 봐야 한다. 모든 case를 적는다 — 새 상태를 더하면(WO-43) 컴파일러가 이곳을 알려 준다.
-    public var isProblem: Bool {
+    /// 사람이 읽는 한 줄(패널 머리 설명, WO-53). 모든 case를 적는다.
+    public var detail: String {
         switch self {
-        case .notRegistered, .requiresApproval, .connecting, .connected: false
-        case .registrationFailed, .identityError, .verificationFailed, .relaunchNeeded, .staleDaemon, .rolledBack, .noResponse, .malformedReply,
-             .daemonError: true
-        }
-    }
-}
-
-/// 메뉴바 아이콘(WO-14 2번, D28). 우선순위: 데몬을 믿을 수 없음 → 감시가 돌지 않음(미등록·승인 대기 포함) → 알림 꺼짐 → 일시정지 →
-/// 연결 중 → 살펴볼 것 → 정상. 위험이 있으면 빨강이다 — 연결 중·살펴볼 것·정상이면 위험 아이콘으로, 그보다 높은 상태면 그 모양 그대로
-/// 빨강으로 한다(위험에 가려지지 않게, 재리뷰 두 리뷰 L).
-public struct StatusIcon: Equatable, Sendable {
-    public let symbol: String
-    public let red: Bool
-    /// 접근성 이름(VoiceOver).
-    public let label: String
-
-    public init(daemon: DaemonStatus, hasRisk: Bool, notificationsOn: Bool, paused: Bool, needsAttention: Bool) {
-        // 모든 case를 적는다 — 새 상태를 더하면(WO-43) 컴파일러가 이곳을 알려 준다.
-        let base: (symbol: String, label: String)
-        var calm = false
-        switch daemon {
-        case .verificationFailed, .rolledBack, .identityError: base = ("xmark.shield", "데몬을 믿을 수 없음")
-        case .notRegistered: base = ("shield.slash", "감시가 돌지 않음, 데몬 미등록")
-        case .requiresApproval: base = ("shield.slash", "감시가 돌지 않음, 승인 필요")
-        case .registrationFailed, .relaunchNeeded, .staleDaemon, .noResponse, .malformedReply, .daemonError: base = ("shield.slash", "감시가 돌지 않음")
-        case .connecting, .connected:
-            if !notificationsOn { base = ("bell.slash", "알림 꺼짐") }
-            else if paused { base = ("pause.circle", "일시정지") }
-            else {
-                calm = true
-                if case .connected = daemon { base = needsAttention ? ("exclamationmark.shield", "살펴볼 것 있음") : ("shield", "정상") }
-                else { base = ("shield.lefthalf.filled", "연결 중") }
-            }
-        }
-        if !hasRisk {
-            (symbol, red, label) = (base.symbol, false, base.label)
-        } else if calm {
-            (symbol, red, label) = ("exclamationmark.shield.fill", true, "보안 위험 있음")
-        } else {
-            (symbol, red, label) = (base.symbol, true, "보안 위험 있음, \(base.label)")
+        case .notRegistered: "데몬이 등록되지 않았어요"
+        case .requiresApproval: "시스템 설정에서 승인이 필요해요"
+        case .registrationFailed: "데몬을 등록하지 못했어요"
+        case .identityError: "앱 서명을 확인하지 못했어요"
+        case .connecting: "데몬과 연결하고 있어요"
+        case .connected(let build): "연결됨 (빌드 \(build))"
+        case .verificationFailed: "데몬 서명 검증에 실패했어요"
+        case .relaunchNeeded: "업데이트됐어요. Haetae를 다시 실행하세요"
+        case .staleDaemon: "등록된 데몬이 옛 빌드예요"
+        case .rolledBack: "데몬이 옛 빌드로 되돌려져 모든 요청을 거부해요"
+        case .noResponse: "데몬이 응답하지 않아요"
+        case .malformedReply: "데몬 응답 형식이 맞지 않아요"
+        case .daemonError(let code): "데몬 오류 (코드 \(code))"
         }
     }
 }

@@ -9,32 +9,27 @@ struct MenuBarIcon: View {
     var body: some View {
         let icon = self.icon
         Group {
-            if icon.red {
-                // 메뉴바 이미지는 템플릿으로 그려져 색이 빠진다 — 빨강은 템플릿이 아닌 이미지로.
-                Image(nsImage: Self.redImage(icon.symbol))
-            } else {
-                Image(systemName: icon.symbol)
-            }
+            Image(nsImage: Self.image(icon.symbol, red: icon.red))
         }
         .accessibilityLabel(icon.label)
     }
 
     private var icon: StatusIcon {
-        let scan = state.scan
-        let report = scan?.lastReport
-        return StatusIcon(
-            daemon: state.daemonStatus,
-            hasRisk: scan?.risks.contains(where: \.isRisk) ?? false,
-            notificationsOn: scan?.notificationsEnabled ?? true,
-            paused: scan?.pausedUntil != nil,
-            needsAttention: scan?.problem != nil || scan?.recordRebuilt == true || (report?.droppedFindings ?? 0) > 0 || report?.scanGap != nil
-        )
+        StatusIcon(state: state.watchState, hasRisk: state.scan?.risks.contains(where: \.isRisk) ?? false)
     }
 
-    private static func redImage(_ symbol: String) -> NSImage {
-        let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
+    /// 기호 크기는 기본보다 조금 크게(사용자 요청 2026-11-27). 메뉴바 이미지는 템플릿으로 그려져 색이 빠진다 — 빨강은 템플릿이 아닌 이미지로.
+    private static let pointSize: CGFloat = 16
+    private static var cache: [String: NSImage] = [:]
+
+    private static func image(_ symbol: String, red: Bool) -> NSImage {
+        let key = "\(symbol)|\(red)"
+        if let cached = cache[key] { return cached }
+        var configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
+        if red { configuration = configuration.applying(NSImage.SymbolConfiguration(paletteColors: [.systemRed])) }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) ?? NSImage()
-        image.isTemplate = false
+        image.isTemplate = !red
+        cache[key] = image
         return image
     }
 }

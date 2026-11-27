@@ -26,6 +26,14 @@ final class AppState {
     /// 데몬 요구사항을 만들지 못했으면(`AppIdentity` 실패) nil — 검사하지 않는다.
     let scan: ScanController?
 
+    /// 메뉴바 아이콘과 패널 머리가 함께 쓰는 지금 상태(WO-53 0번).
+    var watchState: WatchState {
+        WatchState(
+            daemon: daemonStatus, notificationsOn: scan?.notificationsEnabled ?? true, paused: scan?.pausedUntil != nil,
+            needsAttention: scan?.needsAttention ?? false
+        )
+    }
+
     private let registrar: ServiceRegistrar
     private let client: DaemonClient?
 

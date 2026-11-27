@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 import UserNotifications
@@ -44,6 +45,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         await post("Haetae 기록을 읽지 못해 다시 만들었어요. 메뉴바에서 확인하세요.")
     }
 
+    /// 시스템 설정의 이 앱 알림 화면(패널 배너·설정 창이 함께 쓴다). 주소가 바뀌어 열지 못하면 알림 화면 전체라도 연다.
+    static func openSystemSettings() {
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)"),
+           NSWorkspace.shared.open(url) { return }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// 패널이 열려 앱이 앞에 있어도 배너를 띄운다.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
@@ -77,11 +88,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         do {
             return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, any Error>) in
                 let once = Once(continuation)
-                Task { once.resume(with: .success(await work())) }
-                Task {
+                let timer = Task {
                     do { try await Task.sleep(for: Self.deadline) } catch { return }
                     Log.app.error("알림 서버 응답 없음")
                     once.resume(with: .success(false))
+                }
+                // 일이 먼저 끝나면 타이머를 멈춘다 — 안 멈추면 5초 뒤 "응답 없음"이 잘못 찍히고 타이머가 남는다(2026-11-27 실측).
+                Task {
+                    once.resume(with: .success(await work()))
+                    timer.cancel()
                 }
             }
         } catch {

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HaetaeAppCore
 import HaetaeShared
@@ -10,6 +11,9 @@ import Observation
 final class ScanController {
     /// 아직 있는 위험(검사마다 기록에서 다시 읽는다).
     private(set) var risks: [Risk]
+    /// `risks` 중 데몬 응답으로 확인한 지문. `risks`와 같은 때에만 바꾼다 — 따로 읽으면 맞추기 뒤·다시 읽기 전 사이에 파일에 심은
+    /// 옛 증거가 "확인됨"으로 보일 수 있다(WO-53 보안 리뷰 L1).
+    private(set) var verifiedFingerprints: Set<String> = []
     private(set) var lastReport: ScanReport?
     private(set) var problem: ScanProblem?
     private(set) var nextScanAt: Date?
@@ -19,6 +23,17 @@ final class ScanController {
     private(set) var notificationsEnabled = true
     /// 기록 파일을 읽지 못했거나 데몬 요약으로 다시 만들었다(Q72). 이번 실행 동안 패널에 남긴다.
     private(set) var recordRebuilt = false
+    /// 판정 방식 이름(패널 맨 아래 줄·설정 정보 탭). WO-22·23이 모델 판정을 붙이면 여기만 바꾼다(설계 리뷰 L4).
+    var judgeName: String { "규칙 판정" }
+    /// 검사가 돌고 있다(Q77 — 패널 "검사하고 있어요").
+    private(set) var isScanning = false
+    /// 스케줄러가 돌고 있다(데몬 승인 확인 뒤 `start`). 아니면 "지금 검사"가 아무 일도 하지 않는다(설계 리뷰 L1).
+    private(set) var isStarted = false
+
+    /// 연결은 됐지만 살펴볼 것이 있다(메뉴바 아이콘·패널 머리, `WatchState.attention`).
+    var needsAttention: Bool {
+        PanelBanner.needsAttention(report: lastReport, problem: problem, recordRebuilt: recordRebuilt)
+    }
 
     @ObservationIgnored var onConnected: ((_ daemonBuild: Int) -> Void)?
     @ObservationIgnored var onCollectFailure: ((any Error) -> Void)?
@@ -31,12 +46,15 @@ final class ScanController {
     @ObservationIgnored private var missedRiskAlert = false
     @ObservationIgnored private var missedRebuildAlert = false
     @ObservationIgnored private var rebuildNotified = false
+    @ObservationIgnored private var activationObserver: (any NSObjectProtocol)?
 
     init(source: any FindingSource, store: RiskStore = RiskStore(), settings: AppSettings = AppSettings(), notifier: Notifier = Notifier()) {
         self.store = store
         self.settings = settings
         self.notifier = notifier
-        risks = store.activeRisks
+        let active = store.activeRisks
+        risks = active
+        verifiedFingerprints = Set(active.map(\.fingerprint).filter(store.isVerified))
         scanInterval = settings.scanInterval
         let pipeline = ScanPipeline(
             source: source, store: store, judgeProvider: { RuleOnlyJudge() },
@@ -44,7 +62,12 @@ final class ScanController {
             report: { [weak self] in self?.handle($0) }
         )
         scheduler = ScanScheduler(
-            settings: settings, run: { await pipeline.run() },
+            settings: settings,
+            run: { [weak self] in
+                self?.isScanning = true
+                await pipeline.run()
+                self?.isScanning = false
+            },
             onPauseChange: { [weak self] in self?.refreshSettings() },
             onSchedule: { [weak self] wait in self?.nextScanAt = Date().addingTimeInterval(wait / .seconds(1)) }
         )
@@ -55,16 +78,23 @@ final class ScanController {
         await notifier.setUp()
         if store.loadFailed { await noteRecordRebuilt() }
         await refreshNotifications()
+        // 시스템 설정에서 알림을 켜고 돌아오면 앱이 앞으로 온다 — 열려 있던 설정 창·패널은 다시 나타나는 게 아니라 `.task`가 돌지
+        // 않으니 여기서 다시 읽는다(WO-55 설계 재리뷰 L1).
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) {
+            [weak self] _ in Task { @MainActor in await self?.refreshNotifications() }
+        }
     }
 
     /// 데몬 승인 확인이 끝난 뒤 `AppState`가 부른다. 첫 검사가 곧 연결 확인이다.
     func start() {
         scheduler?.start()
+        isStarted = scheduler != nil
     }
 
     /// 앱을 끝내기 전에 부른다 — 데몬에 "사용자 종료"를 알린 뒤 새 검사가 다시 연결하면 비정상 종료로 적힌다.
     func stop() {
         scheduler?.stop()
+        isStarted = false
     }
 
     func scanNow() {
@@ -95,15 +125,11 @@ final class ScanController {
         return scheduler?.setInterval(interval) ?? false
     }
 
-    /// 파일에서 읽고 아직 데몬 응답으로 확인 못 한 항목이면 false — 패널은 "확인 전"으로 보인다.
-    func isVerified(_ risk: Risk) -> Bool {
-        store.isVerified(risk.fingerprint)
-    }
-
     /// 파이프라인의 결과를 상태로 바꾸는 유일한 곳(WO-14 0번).
     private func handle(_ result: Result<ScanReport, ScanFailure>) {
         // 실패해도 해결·맞추기는 반영됐을 수 있어 늘 다시 읽는다.
         risks = store.activeRisks
+        verifiedFingerprints = Set(risks.map(\.fingerprint).filter(store.isVerified))
         switch result {
         case .success(let report):
             accept(report)
@@ -149,7 +175,8 @@ final class ScanController {
     }
 
     /// 알림이 꺼졌다 켜지면 그동안 못 보낸 알림을 한 번 보낸다(아직 있는 위험 수 기준).
-    private func refreshNotifications() async {
+    /// 패널·설정 창이 열릴 때도 부른다 — 시스템 설정에서 알림을 켜고 돌아오면 다음 검사(최대 60분)까지 기다리지 않게(WO-55 설계 리뷰 L3).
+    func refreshNotifications() async {
         notificationsEnabled = await notifier.isEnabled()
         guard notificationsEnabled else { return }
         if missedRiskAlert {
