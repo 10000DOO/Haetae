@@ -4,19 +4,8 @@ import HaetaeShared
 import os
 import Synchronization
 
-nonisolated enum DaemonClientError: Error {
-    /// 디스크의 앱이나 데몬이 더 새 빌드다. 앱이 다시 떠야 한다(D20).
-    case needsRelaunch
-    /// Debug에서만: 데몬이 더 옛 빌드다.
-    case staleDaemon
-    /// 다시 시도해도 데몬이 서명 요구사항을 통과하지 못했다.
-    case verificationFailed
-    case noResponse
-    case timeout
-}
-
-/// XPC 응답·오류 핸들러·타임아웃 중 먼저 온 하나만 continuation을 깨운다.
-private nonisolated final class Once<T: Sendable>: Sendable {
+/// 응답·오류·타임아웃 중 먼저 온 하나만 continuation을 깨운다(XPC 호출, 알림 등록 상한).
+nonisolated final class Once<T: Sendable>: Sendable {
     private let continuation: Mutex<CheckedContinuation<T, any Error>?>
 
     init(_ continuation: CheckedContinuation<T, any Error>) {
@@ -29,11 +18,14 @@ private nonisolated final class Once<T: Sendable>: Sendable {
 }
 
 /// 데몬 연결 하나를 쥐고 있는다. 앱이 연결을 쥐고 있는 동안 데몬이 떠 있다(D15).
+/// `FindingSource`·`PatternInstaller`는 `NonisolatedNonsendingByDefault`로 컴파일된 다른 모듈의 프로토콜이라, 채택한 메서드마다
+/// `@MainActor`를 직접 붙인다 — 안 붙이면 nonisolated로 잡혀 연결 상태를 쓰지 못한다(WO-14 0번).
 @MainActor
-final class DaemonClient {
+final class DaemonClient: FindingSource, PatternInstaller {
     /// 데몬은 사용자마다 줄을 세워 검사한다. 다른 사용자 실행 하나를 기다리는 시간까지 잡는다(Q63). 셋 이상 겹쳐 넘치면 다시 시도가
-    /// 같은 실행의 결과를 받는다(데몬이 같은 uid 요청을 합친다).
+    /// 같은 실행의 결과를 받는다(데몬이 같은 uid 요청을 합친다). ack도 같다 — 데몬의 ack 확정이 다른 사용자 검사를 기다릴 수 있다.
     private static let collectTimeout: Duration = HaetaeLimits.maxRunDuration * 2 + .seconds(5)
+    private static let installTimeout: Duration = .seconds(30)
     private static let quitTimeout: Duration = .seconds(2)
 
     private let identity: AppIdentity
@@ -46,7 +38,7 @@ final class DaemonClient {
     }
 
     /// 재시도·재실행 판단은 `ReconnectPolicy`가 한다. 여기서는 XPC 호출과 결과 분류만 한다.
-    func collect() async throws -> CollectResult {
+    @MainActor func collect() async throws -> CollectResult {
         var state = ReconnectPolicy.State()
         var wait: Duration = .zero
         while true {
@@ -86,7 +78,7 @@ final class DaemonClient {
             switch ReconnectPolicy.next(after: attempt, running: identity.build, state: &state) {
             case .accept:
                 guard let data else { throw HaetaeXPCError.internalError }
-                return try CollectResult.decodeValidated(data)
+                return try await Self.decodeResult(data)
             case .relaunch:
                 throw DaemonClientError.needsRelaunch
             case .staleDaemon:
@@ -103,6 +95,27 @@ final class DaemonClient {
                 throw verificationFailed ? DaemonClientError.verificationFailed : DaemonClientError.noResponse
             }
         }
+    }
+
+    /// 저장을 마친 뒤 받은 것을 알린다(D24). 0건이어도 빈 목록으로 부른다 — 데몬은 이것으로 검사 공백 표시를 지운다(Q67).
+    /// 다시 시도하지 않는다 — 실패하면 파이프라인이 다음 검사에서 다시 저장·ack한다.
+    @MainActor func ack(_ fingerprints: [String]) async throws {
+        let data = try HaetaeXPC.encodeAck(fingerprints)
+        let _: Bool = try await call(timeout: Self.collectTimeout) { proxy, once in
+            proxy.ack(data) { error in once.resume(with: error.map { .failure(Self.decode($0)) } ?? .success(true)) }
+        }
+    }
+
+    /// 패턴 팩을 데몬에 넣는다(WO-41 — 데몬은 아직 `notImplemented`).
+    @MainActor func installPatterns(_ pack: Data, signature: Data) async throws {
+        let _: Bool = try await call(timeout: Self.installTimeout) { proxy, once in
+            proxy.installPatterns(pack, signature: signature) { error in once.resume(with: error.map { .failure(Self.decode($0)) } ?? .success(true)) }
+        }
+    }
+
+    /// 응답은 4MB까지 온다 — 메인 액터 밖에서 푼다(WO-14 0번).
+    @concurrent private nonisolated static func decodeResult(_ data: Data) async throws -> CollectResult {
+        try CollectResult.decodeValidated(data)
     }
 
     /// 사용자가 끄거나 의도해서 다시 뜰 때만 부른다. 데몬이 비정상 종료로 기록하지 않게 한다(D28).

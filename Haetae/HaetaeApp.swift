@@ -60,8 +60,10 @@ struct HaetaeApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Haetae", systemImage: "shield") {
+        MenuBarExtra {
             PanelView(state: state)
+        } label: {
+            MenuBarIcon(state: state)
         }
         .menuBarExtraStyle(.window)
 

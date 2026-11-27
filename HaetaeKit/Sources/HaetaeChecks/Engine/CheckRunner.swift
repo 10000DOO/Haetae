@@ -449,11 +449,7 @@ public actor CheckRunner {
         UInt64(fingerprint.prefix(16), radix: 16) ?? 0
     }
 
-    /// 결합 문자(Mn·Me)는 글자 하나에 이만큼만 남긴다 — 수천 개를 쌓아 화면을 덮지 못하게(Zalgo). 일반 글자는 3개를 넘지 않는다.
-    /// 띄어 쓰는 결합 문자(Mc — 버마어 등)는 세지 않는다.
-    static let maxCombiningMarks = 4
-
-    /// 보이지 않거나 화면을 속이는 문자 치환 → 비밀 가리기 → 길이 상한. 길이는 Unicode scalar 수로 세고 꼬리까지 포함해 상한 이하다.
+    /// 보이지 않거나 화면을 속이는 문자 치환(`Finding.displaySafe`) → 비밀 가리기 → 길이 상한. 길이는 Unicode scalar 수로 세고 꼬리까지 포함해 상한 이하다.
     static func clean(_ text: String, limit: Int, multiline: Bool) -> String {
         // 가리기 전에 대강 자른다 — 공격자가 고른 긴 내용이 정규식을 오래 붙잡지 못하게. 자른 끝의 덩어리는 버린다 —
         // 잘린 토큰은 가리기 규칙에 걸리지 않아 앞부분이 그대로 나간다(공백이 없으면 덩어리째 가리기 규칙에 맡긴다).
@@ -463,32 +459,7 @@ public actor CheckRunner {
         if precut, let lastSpace = source.lastIndex(where: \.properties.isWhitespace) {
             source = source[..<lastSpace]
         }
-        var scalars = String.UnicodeScalarView()
-        var marks = 0
-        for scalar in source {
-            let properties = scalar.properties
-            switch properties.generalCategory {
-            case .control where multiline && (scalar == "\n" || scalar == "\t"):
-                scalars.append(scalar)
-                marks = 0
-            // 제어 문자는 JSON에서 6바이트로 늘어 원장을 불리고, 방향 제어 문자는 화면에서 글자 순서를 뒤집는다. 사설 영역(애플 로고
-            // 같은 모양으로 제목을 꾸밈)·미할당·서로게이트, 기본적으로 보이지 않는 문자(변형 선택자, 한글 채움 문자, 태그 문자 —
-            // 보이지 않게 데이터를 실어 LLM에 넣는 데 쓰임)와 점자 빈칸도 공백으로 바꾼다.
-            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate:
-                scalars.append(" ")
-                marks = 0
-            case _ where properties.isDefaultIgnorableCodePoint || scalar.value == 0x2800:
-                scalars.append(" ")
-                marks = 0
-            case .nonspacingMark, .enclosingMark:
-                marks += 1
-                if marks <= maxCombiningMarks { scalars.append(scalar) }
-            default:
-                scalars.append(scalar)
-                marks = 0
-            }
-        }
-        let masked = SecretMasker.mask(String(scalars))
+        let masked = SecretMasker.mask(Finding.displaySafe(String(String.UnicodeScalarView(source)), multiline: multiline))
         let tail = "…(잘림)"
         guard precut || masked.unicodeScalars.count > limit else { return masked }
         return String(String.UnicodeScalarView(masked.unicodeScalars.prefix(limit - tail.unicodeScalars.count))) + tail

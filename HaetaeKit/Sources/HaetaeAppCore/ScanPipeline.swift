@@ -17,12 +17,13 @@ public struct ScanReport: Sendable, Equatable {
     public var restored: Int
 }
 
-/// 파이프라인이 멈춘 곳. 원인 오류는 바꾸지 않고 그대로 싣는다 — `AppState`가 한 함수에서 상태로 바꾼다(WO-14 0번).
+/// 파이프라인이 멈춘 곳. 원인 오류는 바꾸지 않고 그대로 싣는다 — 앱이 한 함수에서 상태로 바꾼다(WO-14 0번). 수집 뒤에 멈췄으면
+/// 그 검사의 보고도 싣는다 — 안 실으면 연결 상태·검사 공백·실패한 검사가 화면에 오지 않는다(기록 파일을 폴더로 바꿔 두면 계속).
 public enum ScanFailure: Error {
     case collect(any Error)
     /// 기록을 쓰지 못해 ack하지 않았다(D24). 알림은 이미 갔다.
-    case store(any Error)
-    case ack(any Error)
+    case store(any Error, ScanReport)
+    case ack(any Error, ScanReport)
 }
 
 /// 수집 → 해결 반영 → 기록 맞추기 → 판정 → 저장 → 알림 → 쓰기 → ack(WO-13 3번, 순서를 바꾸지 않는다).
@@ -31,7 +32,8 @@ public final class ScanPipeline {
     private let source: any FindingSource
     private let store: RiskStore
     private let judgeProvider: () -> any RiskJudge
-    private let notify: (_ count: Int, _ highest: RiskLevel) -> Void
+    /// 알림 등록을 마친 뒤 돌아온다 — ack가 알림보다 먼저 나가지 않게(D24).
+    private let notify: (_ count: Int, _ highest: RiskLevel) async -> Void
     private let report: (Result<ScanReport, ScanFailure>) -> Void
     private let now: () -> Date
     /// 이 실행에서 알렸지만 아직 ack가 성공하지 않은 지문과 그 판정. 새 건인지는 이것으로만 정한다 — 파일 기록은 같은 사용자가 지문을
@@ -42,7 +44,7 @@ public final class ScanPipeline {
 
     public init(
         source: any FindingSource, store: RiskStore, judgeProvider: @escaping () -> any RiskJudge,
-        notify: @escaping (_ count: Int, _ highest: RiskLevel) -> Void,
+        notify: @escaping (_ count: Int, _ highest: RiskLevel) async -> Void,
         report: @escaping (Result<ScanReport, ScanFailure>) -> Void, now: @escaping () -> Date = { Date() }
     ) {
         self.source = source
@@ -91,12 +93,16 @@ public final class ScanPipeline {
                 return risk
             }
         })
-        if let highest = alerts.map(\.level).max(by: { $0.rank < $1.rank }) { notify(alerts.count, highest) }
+        if let highest = alerts.map(\.level).max(by: { $0.rank < $1.rank }) { await notify(alerts.count, highest) }
+        let summary = ScanReport(
+            finishedAt: now(), daemonBuild: result.daemonBuild, patternVersion: result.patternVersion, failedChecks: result.failedChecks,
+            scanGap: result.scanGap, droppedFindings: result.droppedFindings ?? 0, alerted: alerts.count, restored: restored
+        )
         store.purge()
         do {
             try store.commit()
         } catch {
-            return report(.failure(.store(error)))
+            return report(.failure(.store(error, summary)))
         }
 
         let fingerprints = Array(stored)
@@ -108,12 +114,9 @@ public final class ScanPipeline {
                 for fingerprint in chunk { awaitingAck[fingerprint] = nil }
             }
         } catch {
-            return report(.failure(.ack(error)))
+            return report(.failure(.ack(error, summary)))
         }
-        report(.success(ScanReport(
-            finishedAt: now(), daemonBuild: result.daemonBuild, patternVersion: result.patternVersion, failedChecks: result.failedChecks,
-            scanGap: result.scanGap, droppedFindings: result.droppedFindings ?? 0, alerted: alerts.count, restored: restored
-        )))
+        report(.success(summary))
     }
 
     /// 데몬이 이미 받은(ack를 반영한) 지문을 잊는다 — ack 응답만 잃으면(타임아웃, 데몬이 꺼지는 순간) 그 지문이 남아, 해결 뒤 다시
@@ -137,7 +140,8 @@ public final class ScanPipeline {
             if finding.ruleLevel == .high { risk.level = .high }
             // 높음은 늘 위험이다(LLM이 올리면서 위험 아님이라고 해도 — "높음인데 위험 아님"으로 보이지 않게).
             risk.isRisk = risk.level == .high || (risk.isRisk && risk.level != .low)
-            risk.reason = String(String.UnicodeScalarView(risk.reason.unicodeScalars.prefix(Risk.maxReasonChars)))
+            // LLM 이유도 화면을 속이는 문자를 정리하고 자른다(D12).
+            risk.reason = String(String.UnicodeScalarView(Finding.displaySafe(risk.reason, multiline: false).unicodeScalars.prefix(Risk.maxReasonChars)))
             risk.resolvedAt = nil
             return risk
         }

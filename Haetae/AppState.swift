@@ -5,15 +5,7 @@ import Observation
 import os
 import ServiceManagement
 
-enum DaemonStatus: Equatable {
-    case notRegistered
-    case requiresApproval
-    case connecting
-    case connected(build: Int)
-    case verificationFailed
-    case error(String)
-}
-
+/// 데몬 수명(등록·승인·핸드오프·재실행·종료)과 연결 상태. 검사 쪽 상태와 조작은 `ScanController`(`scan`)가 맡는다.
 @Observable
 @MainActor
 final class AppState {
@@ -31,27 +23,34 @@ final class AppState {
     private var quitTask: Task<Void, Never>?
     var isQuitting: Bool { quitTask != nil }
 
+    /// 데몬 요구사항을 만들지 못했으면(`AppIdentity` 실패) nil — 검사하지 않는다.
+    let scan: ScanController?
+
     private let registrar: ServiceRegistrar
     private let client: DaemonClient?
-    private var isConnecting = false
 
     init(registrar: ServiceRegistrar, client: DaemonClient?) {
         self.registrar = registrar
         self.client = client
+        scan = client.map { ScanController(source: $0) }
         needsInstall = !registrar.canRegister()
         // agent가 이미 풀렸으면 "종료할 때 끄기" 표시는 끝난 일이다.
         if !registrar.isAgentRegistered { registrar.disablesAgentOnQuit = false }
         launchAtLogin = registrar.isAgentRegistered && !registrar.disablesAgentOnQuit
     }
 
+    /// 검사는 데몬 승인 확인이 끝난 뒤 시작한다.
     func start() {
+        scan?.onConnected = { [weak self] build in self?.daemonStatus = .connected(build: build) }
+        scan?.onCollectFailure = { [weak self] error in self?.handleCollectFailure(error) }
         client?.onInvalidated = { [weak self] in
             guard let self, case .connected = daemonStatus else { return }
-            // 연결이 끊겼는데 "연결됨"으로 남지 않게 한다.
+            // 연결이 끊겼는데 "연결됨"으로 남지 않게 한다. 다시 붙는 것은 파이프라인의 수집이 한다.
             daemonStatus = .connecting
-            Task { await self.connect() }
+            scan?.connectionLost()
         }
-        Task { await connect() }
+        Task { await scan?.setUp() }
+        Task { await prepareDaemon() }
         // 등록할 수 없는 번들(빌드 폴더에서 연 것)은 agent와 상관없는 인스턴스라 물러나지 않는다.
         if !registrar.launchedByAgent, !needsInstall {
             Task { await handOffWhenAgentStarts() }
@@ -64,6 +63,7 @@ final class AppState {
         while !(registrar.isAgentRegistered && !registrar.disablesAgentOnQuit) {
             do { try await Task.sleep(for: Self.approvalPollInterval) } catch { return }
         }
+        scan?.stop()
         await client?.markUserQuit()
         exit(0)
     }
@@ -78,6 +78,7 @@ final class AppState {
                     try registrar.enableAgent()
                     // launchd가 방금 띄운 agent 인스턴스가 이 인스턴스를 보고 양보하기를 되풀이하지 않게 이쪽이 물러난다.
                     if registrar.isAgentRegistered, !registrar.launchedByAgent {
+                        scan?.stop()
                         await client?.markUserQuit()
                         exit(0)
                     }
@@ -107,6 +108,8 @@ final class AppState {
     /// 한 번만 돈다. 겹친 종료 요청은 같은 작업이 끝나기를 기다린다.
     func prepareToQuit() async {
         if quitTask == nil {
+            // 알린 뒤에 새 검사가 다시 연결하면 데몬이 그 연결을 비정상 종료로 적는다.
+            scan?.stop()
             quitTask = Task {
                 await client?.markUserQuit()
                 // 마지막에 한다. launchd가 띄운 인스턴스면 여기서 프로세스가 끝난다.
@@ -117,11 +120,8 @@ final class AppState {
         isReadyToTerminate = true
     }
 
-    func connect() async {
-        guard !isConnecting else { return }
-        isConnecting = true
-        defer { isConnecting = false }
-
+    /// 데몬을 등록하고 승인을 기다린 뒤 검사를 시작한다. 첫 검사가 곧 연결 확인이다.
+    private func prepareDaemon() async {
         var registerFailed = false
         do {
             try registrar.registerDaemonIfNeeded()
@@ -137,42 +137,37 @@ final class AppState {
             do { try await Task.sleep(for: Self.approvalPollInterval) } catch { return }
         }
         guard registrar.daemonStatus == .enabled else {
-            daemonStatus = registerFailed ? .error("등록 실패") : .notRegistered
+            daemonStatus = registerFailed ? .registrationFailed : .notRegistered
             return
         }
-        guard let client else {
-            daemonStatus = .error("팀 ID 설정 오류")
+        guard let scan else {
+            daemonStatus = .identityError
             return
         }
-
         daemonStatus = .connecting
-        do {
-            daemonStatus = .connected(build: try await client.collect().daemonBuild)
-        } catch DaemonClientError.needsRelaunch {
-            await relaunch()
-        } catch DaemonClientError.verificationFailed {
-            daemonStatus = .verificationFailed
-        } catch DaemonClientError.staleDaemon {
-            daemonStatus = .error("데몬이 옛 빌드")
-        } catch let error as HaetaeXPCError {
-            daemonStatus = .error("데몬 오류 \(error.rawValue)")
-        } catch is WireValidationError, is DecodingError {
-            daemonStatus = .error("데몬 응답 형식 오류")
-        } catch {
-            daemonStatus = .error("데몬 응답 없음")
+        scan.start()
+    }
+
+    private func handleCollectFailure(_ error: any Error) {
+        switch CollectFailureAction(error) {
+        case .relaunch: Task { await relaunch() }
+        case .ignore: break
+        case .show(let status): daemonStatus = status
         }
     }
 
     /// 새 인스턴스를 직접 띄우지 않는다(단일 실행 규칙 때문에 둘 다 꺼진다). launchd의 재실행에 맡긴다.
     private func relaunch() async {
-        guard let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) else { return }
+        // 사용자가 끄는 중이면 다시 띄우지 않는다(R13).
+        guard !isQuitting, let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) else { return }
         let key = "relaunchCount.\(build)"
         let count = UserDefaults.standard.integer(forKey: key)
         guard ReconnectPolicy.mayRelaunch(launchedByAgent: registrar.launchedByAgent, agentRegistered: registrar.isAgentRegistered, relaunchCount: count) else {
-            daemonStatus = .error("다시 실행 필요")
+            daemonStatus = .relaunchNeeded
             return
         }
         UserDefaults.standard.set(count + 1, forKey: key)
+        scan?.stop()
         await client?.markUserQuit()
         exit(ServiceRegistrar.relaunchExitCode)
     }

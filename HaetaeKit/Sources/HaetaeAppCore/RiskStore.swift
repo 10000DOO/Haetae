@@ -41,8 +41,9 @@ public final class RiskStore {
             let stored: Stored = try JSONWire.decode(data, maxBytes: Self.maxFileBytes)
             guard stored.schemaVersion == Self.schemaVersion else { throw CocoaError(.fileReadCorruptFile) }
             let at = now()
-            // 형식이 틀린 줄은 버린다(ack로 보낼 수 없는 지문, 패널을 멈출 만큼 긴 글). 미래 시각은 지금으로 — 30일 정리를 피하지 못하게.
-            for var risk in stored.risks where Self.isValid(risk) {
+            // 형식이 틀린 줄은 버린다(ack로 보낼 수 없는 지문, 패널을 멈출 만큼 긴 글, 데몬이 정리하지 않은 모양의 글). 미래 시각은 지금으로 —
+            // 30일 정리를 피하지 못하게.
+            for var risk in stored.risks where Self.isValid(risk) && Self.isDaemonShaped(risk) {
                 if let resolved = risk.resolvedAt, resolved > at { risk.resolvedAt = at }
                 risks[risk.fingerprint] = Self.distrustJudgment(risk)
             }
@@ -208,6 +209,14 @@ public final class RiskStore {
             && risk.finding.title.unicodeScalars.count <= HaetaeLimits.maxTitleChars
             && risk.finding.evidence.unicodeScalars.count <= HaetaeLimits.maxEvidenceChars
             && risk.reason.unicodeScalars.count <= Risk.maxReasonChars
+    }
+
+    /// 파일에서 읽은 제목·증거는 데몬이 정리한 모양이어야 한다(`Finding.displaySafe`) — 방향 제어 문자·줄바꿈·결합 문자 더미가 든 줄은
+    /// 심은 것이라 버린다(데몬은 이런 글을 만들지 않는다, WO-14 2단계 리뷰 실측). 데몬 응답(`save`)에는 걸지 않는다 — 다음 버전에서
+    /// 규칙을 넓히면 옛 데몬이 원장에 남긴 글이 걸려 저장·ack되지 못한다(재리뷰 설계 L1). 그렇게 저장된 줄은 다음 실행에서 버려지고 요약으로 되살아난다.
+    private static func isDaemonShaped(_ risk: Risk) -> Bool {
+        Finding.displaySafe(risk.finding.title, multiline: false) == risk.finding.title
+            && Finding.displaySafe(risk.finding.evidence, multiline: true) == risk.finding.evidence
     }
 
     /// 파일에서 읽은 판정은 믿지 않는다(Q71 1번) — 수준·위험 여부는 규칙 수준으로, 이유는 고정 문구로 되돌린다. LLM이 낮춘 것은 앱이

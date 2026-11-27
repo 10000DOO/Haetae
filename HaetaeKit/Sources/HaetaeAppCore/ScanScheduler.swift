@@ -7,6 +7,7 @@ public final class ScanScheduler {
     private let settings: AppSettings
     private let run: () async -> Void
     private let onPauseChange: () -> Void
+    private let onSchedule: (_ wait: Duration) -> Void
     private let clock: () -> ContinuousClock.Instant
     private let sleep: (Duration) async throws -> Void
     private var loop: Task<Void, Never>?
@@ -19,15 +20,18 @@ public final class ScanScheduler {
     /// - Parameters:
     ///   - run: 검사 한 번(`ScanPipeline.run`). 겹쳐 부르면 파이프라인이 합친다.
     ///   - onPauseChange: 일시정지가 시작·끝났다(저절로 끝난 것, 검사 도중 끝난 것 포함) — 아이콘을 제때 바꾸게.
+    ///   - onSchedule: 다음 검사(쉬는 중이면 일시정지가 끝나는 때)까지 잠들기 직전에 남은 시간 — 패널의 "다음 검사".
     ///   - clock, sleep: 테스트에서 주입한다. 잠자기를 세는 시계라 맥이 깨어난 뒤 밀린 검사를 바로 한다.
     public init(
         settings: AppSettings, run: @escaping () async -> Void, onPauseChange: @escaping () -> Void = {},
+        onSchedule: @escaping (_ wait: Duration) -> Void = { _ in },
         clock: @escaping () -> ContinuousClock.Instant = { .now },
         sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.settings = settings
         self.run = run
         self.onPauseChange = onPauseChange
+        self.onSchedule = onSchedule
         self.clock = clock
         self.sleep = sleep
     }
@@ -96,6 +100,7 @@ public final class ScanScheduler {
             let pause = settings.pauseRemaining
             let interval = settings.checkedScanInterval()
             let wait = pause ?? lastRun.map { interval - $0.duration(to: clock()) } ?? .zero
+            onSchedule(max(wait, .zero))
             do {
                 if wait > .zero { try await sleep(wait) }
             } catch {

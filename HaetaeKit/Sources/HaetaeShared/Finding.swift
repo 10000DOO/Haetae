@@ -46,6 +46,40 @@ public struct Finding: Codable, Sendable, Hashable {
         lowercaseHex(SHA256.hash(data: Data(evidence.utf8)))
     }
 
+    /// 결합 문자(Mn·Me)는 글자 하나에 이만큼만 남긴다 — 수천 개를 쌓아 화면을 덮지 못하게(Zalgo). 일반 글자는 3개를 넘지 않는다.
+    /// 띄어 쓰는 결합 문자(Mc — 버마어 등)는 세지 않는다.
+    package static let maxCombiningMarks = 4
+
+    /// 화면에 그리기 전 글을 정리한다(데몬이 검사 결과에, 앱이 판정 이유에 쓴다). 제어 문자는 JSON에서 6바이트로 늘어 원장을 불리고,
+    /// 방향 제어 문자는 화면에서 글자 순서를 뒤집는다(`gpj.exe` → `exe.jpg`). 사설 영역(애플 로고 같은 모양으로 제목을 꾸밈)·미할당·
+    /// 서로게이트, 기본적으로 보이지 않는 문자(변형 선택자, 한글 채움 문자, 태그 문자 — 보이지 않게 데이터를 실어 LLM에 넣는 데 쓰임)와
+    /// 점자 빈칸도 공백으로 바꾸고, 결합 문자는 이어서 `maxCombiningMarks`개까지만 둔다. `multiline`이면 줄바꿈·탭은 둔다.
+    package static func displaySafe(_ text: String, multiline: Bool) -> String {
+        var scalars = String.UnicodeScalarView()
+        var marks = 0
+        for scalar in text.unicodeScalars {
+            let properties = scalar.properties
+            switch properties.generalCategory {
+            case .control where multiline && (scalar == "\n" || scalar == "\t"):
+                scalars.append(scalar)
+                marks = 0
+            case .control, .format, .lineSeparator, .paragraphSeparator, .privateUse, .unassigned, .surrogate:
+                scalars.append(" ")
+                marks = 0
+            case _ where properties.isDefaultIgnorableCodePoint || scalar.value == 0x2800:
+                scalars.append(" ")
+                marks = 0
+            case .nonspacingMark, .enclosingMark:
+                marks += 1
+                if marks <= maxCombiningMarks { scalars.append(scalar) }
+            default:
+                scalars.append(scalar)
+                marks = 0
+            }
+        }
+        return String(scalars)
+    }
+
     package static func isCheckID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= HaetaeLimits.maxCheckIDChars
             && value.utf8.allSatisfy { (0x61...0x7A).contains($0) || (0x30...0x39).contains($0) || $0 == 0x2E || $0 == 0x2D }
