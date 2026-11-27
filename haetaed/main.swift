@@ -25,9 +25,16 @@ if !selfIntegrity.isEmpty { Log.listener.fault("자기 번들 검사 실패 (\(s
 let highestBuild = configuration.variant == .release && configuration.appRequirement != nil
     ? HighestBuild.update(running: configuration.build, in: directory) : nil
 
+// Debug에만 데모 검사를 더한다(WO-54 — 위험 화면 체험용, Release에는 없다).
+#if DEBUG
+let debugChecks: [any SecurityCheck] = [DemoRiskCheck()]
+#else
+let debugChecks: [any SecurityCheck] = []
+#endif
+
 // `CommandRunner`는 데몬 전체에서 하나만 만든다 — 직렬화가 인스턴스 단위라 연결마다 만들면 D26의 "동시 1개"가 깨진다.
 let checkRunner = CheckRunner(
-    checks: CheckRegistry.all + [SelfIntegrityCheck(problems: selfIntegrity)], baseline: BaselineStore(directory: directory), ledger: ledger,
+    checks: CheckRegistry.all + [SelfIntegrityCheck(problems: selfIntegrity)] + debugChecks, baseline: BaselineStore(directory: directory), ledger: ledger,
     runner: CommandRunner(), parser: configuration.parser, daemonBuild: configuration.build
 )
 let coordinator = CollectCoordinator(
