@@ -17,6 +17,9 @@ public enum LedgerEvent: Codable, Sendable, Equatable {
     case settingWeakened(String)
     /// 시작할 때 자기 번들 검사가 실패했다(D20).
     case selfIntegrityFailed(String)
+    /// 지금 돌리지 않는 검사의 기록을 치웠다(WO-56). 알림 완료 건 수(지문마다 `resolved`도 따로 남는다)와 버린 pending 수 —
+    /// 상한 때문에 버린 것(`pendingDropped`)과 기록상 구분되게(T18).
+    case checkRetired(checkID: String, resolved: Int, droppedPending: Int)
     /// 실행 중인 빌드가 본 적 있는 가장 높은 빌드보다 낮다 — 모든 요청을 거부한다(D20).
     case rolledBack(running: Int, highest: Int)
 }
@@ -203,6 +206,31 @@ public actor FindingLedger {
         save()
         record(gone.map { .resolved(fingerprint: $0) }, uid: uid)
         return gone
+    }
+
+    /// 지금 돌리지 않는 검사(지웠거나 이름을 바꾼 검사, Release에는 없는 Debug 전용 검사)의 기록을 치운다(WO-56, Q83).
+    /// 해결 판정(`resolved`)은 이번에 성공한 검사만 보므로, 이것이 없으면 그런 검사의 알림 완료 건이 30일 정리 전까지 남는다.
+    /// 알림 완료 건은 해결로 돌려주고(앱이 패널에서 내린다), pending은 버린다 — 다시 나타날 수 없는 검사의 옛 탐지를 새로 알리지 않게.
+    /// - Parameter known: 데몬에 컴파일된 검사 id와 내부 상태 id만 넘긴다. 설정·패턴 팩으로 "끈 검사"를 빼서 넘기면 끄는 것만으로
+    ///   그 검사의 진짜 위험이 해결로 넘어간다(WO-56 보안 리뷰).
+    /// - Returns: 해결로 보낼 지문과, pending을 버린 checkID(부른 쪽이 그 pending 기준값을 치운다 — `purge`와 같은 이유).
+    public func forgetChecks(notIn known: Set<String>, uid: uid_t) -> (resolved: [String], droppedChecks: Set<String>) {
+        guard var user = state.users[Self.key(uid)] else { return ([], []) }
+        let gone = user.notified.filter { !known.contains($0.value.finding.checkID) }
+        let stale = user.pending.filter { !known.contains($0.value.checkID) }
+        guard !gone.isEmpty || !stale.isEmpty else { return ([], []) }
+        for fingerprint in gone.keys { user.notified[fingerprint] = nil }
+        for fingerprint in stale.keys { user.pending[fingerprint] = nil }
+        state.users[Self.key(uid)] = user
+        save()
+        let resolvedByCheck = Dictionary(grouping: gone.values, by: \.finding.checkID).mapValues(\.count)
+        let droppedByCheck = Dictionary(grouping: stale.values, by: \.checkID).mapValues(\.count)
+        var events = gone.keys.map { LedgerEvent.resolved(fingerprint: $0) }
+        for checkID in Set(resolvedByCheck.keys).union(droppedByCheck.keys).sorted() {
+            events.append(.checkRetired(checkID: checkID, resolved: resolvedByCheck[checkID] ?? 0, droppedPending: droppedByCheck[checkID] ?? 0))
+        }
+        record(events, uid: uid)
+        return (Array(gone.keys), Set(droppedByCheck.keys))
     }
 
     /// 여러 줄을 한 번에 쓴다(폴더 열기·`fsync` 한 번).

@@ -28,6 +28,8 @@ public actor CheckRunner {
     public static let maskBudget: Duration = .seconds(2)
 
     private let checks: [any SecurityCheck]
+    /// 원장 기록이 지금도 쓰일 수 있는 checkID — 등록된 검사와 내부 상태. 이 밖의 기록은 실행마다 치운다(WO-56).
+    private let knownCheckIDs: Set<String>
     private let baseline: BaselineStore
     private let ledger: FindingLedger
     private let patterns: PatternStore
@@ -68,6 +70,7 @@ public actor CheckRunner {
         precondition(Set(ids).count == ids.count, "검사 id가 겹친다")
         precondition(Set(ids).isDisjoint(with: Self.protectedCheckIDs.union([Self.userScope])), "예약된 id를 검사 id로 쓸 수 없다")
         self.checks = checks
+        knownCheckIDs = Set(ids).union(Self.protectedCheckIDs)
         self.baseline = baseline
         self.ledger = ledger
         self.patterns = patterns
@@ -306,6 +309,12 @@ public actor CheckRunner {
         // 두 검사가 같은 지문을 내면(검사 구현 결함) 원장이 뒤의 것으로 덮어 수준이 내려갈 수 있다 — 높은 것 하나만 남긴다.
         findings = Array(Dictionary(findings.map { ($0.fingerprint, $0) }, uniquingKeysWith: { $0.ruleLevel.rank >= $1.ruleLevel.rank ? $0 : $1 }).values)
 
+        // 지금 돌리지 않는 검사의 기록을 먼저 치운다 — pending은 아래 `filterNew`가 다시 내보내지 않게, 알림 완료 건은 해결로(WO-56).
+        let forgotten = await ledger.forgetChecks(notIn: knownCheckIDs, uid: uid)
+        // 버린 pending의 기준값도 치운다 — 같은 id의 검사가 다시 들어와 첫 실행이 실패하면, 알리지 못한 항목이 든 옛 pending
+        // 기준값이 ack 뒤에 확정된다(두 리뷰 L, `purge`와 같은 이유).
+        for checkID in forgotten.droppedChecks { try? baseline.discardPending(checkID: checkID, uid: uid) }
+
         // 아래 순서를 바꾸지 않는다(WO-10 리뷰).
         // 응답에 바로 붙이지 않고 원장을 거친다 — 그래야 ack와 해결 판정이 된다. 상태 Finding도 같다.
         var outgoing = await ledger.filterNew(findings, uid: uid, protecting: Self.protectedCheckIDs)
@@ -358,9 +367,9 @@ public actor CheckRunner {
         await ledger.setLastSuccess(observedAt, checkIDs: succeeded.map(\.check.id).filter { !hold.contains($0) && !unseen.contains($0) }, uid: uid)
 
         // 회복된 검사의 실패 Finding도 해결로 가게 실패 checkID를 함께 넘긴다.
-        var resolved = await ledger.resolved(
+        var resolved = forgotten.resolved + (await ledger.resolved(
             current: reported.union(findings.map(\.fingerprint)), succeededChecks: complete.union([Self.failureCheckID]), uid: uid
-        )
+        ))
 
         // 이번 실행의 쓰기가 모두 끝난 뒤에 꺼낸다. 저장소 Finding의 해결은 따로 판정한다 —
         // 위에서 같이 하면 계속 실패하는 동안 실행마다 "해결"과 "새 탐지"가 번갈아 나온다.
