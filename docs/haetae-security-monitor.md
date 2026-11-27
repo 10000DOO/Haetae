@@ -1,6 +1,6 @@
 # Haetae — 로컬 LLM 보안 감시 메뉴바 앱 — 신규 개발
 
-> 상태: `구현중` · 갱신: 2026-11-26 · 브랜치: `main` · 다음 액션: WO-13(시작 전에 WO-13의 "WO-12에서 넘어온 것"을 읽는다). Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
+> 상태: `구현중` · 갱신: 2026-11-26 · 브랜치: `main` · 다음 액션: WO-14(시작 전에 WO-14의 "WO-13에서 넘어온 것"을 읽는다). Q49는 WO-45 전에 결정. Phase 1에서 남은 사용자 확인: 7-2 R16, R2·R12의 로그아웃 뒤 자동 실행(7-1 P1 등록 흐름의 로그아웃 항목과 함께) — 사용자 지시로 이것들을 남긴 채 Phase 2를 진행 중(검증 실패 표시는 P6로 옮김)(WO마다 별도 에이전트 리뷰) (테스트 WO는 `paseo-handoff`로 별도 에이전트)
 > 상태 단계(고정): `요구사항` → `설계` → `승인대기` → `구현중` → `검증중` → `완료`
 > ⚠️ 본문의 file:line은 드리프트할 수 있음 — 실행 전 반드시 심볼명으로 재확인할 것
 
@@ -131,10 +131,12 @@ classDiagram
     }
     namespace HaetaeAppCore {
         class ScanScheduler {
-            +interval (상·하한 검증)
-            +isPaused (자동 만료)
             +scanNow()
-            +pause() / resume()
+            +setInterval() / pause() / resume() — AppSettings에 쓰고 깨어남
+        }
+        class AppSettings {
+            +scanInterval (상·하한 검증)
+            +pauseRemaining (메모리, 자동 만료)
         }
         class ScanPipeline {
             +run() async
@@ -335,18 +337,16 @@ sequenceDiagram
     R-->>D: CollectResult (새 건, 해결된 지문, 실패한 검사, 검사 공백)
     D-->>C: JSON Data
     C-->>P: CollectResult
-    P->>ST: 해결된 지문 반영
-    alt 새 의심 건 없음
-        P->>P: 검사 시각만 갱신
-    else 새 의심 건 있음
+    P->>ST: 해결된 지문 반영, 알림 완료 요약(notified)으로 맞추기 (Q53·Q69)
+    opt 새 의심 건 있음
         P->>J: judge(새 건) — 모델 준비됐으면 LLMAnalyzer, 아니면 RuleOnlyJudge
         J-->>P: [Risk] (규칙 "높음"은 유지, LLM은 "중간→낮음"까지만, D10)
         P->>ST: 보기용 캐시 저장
         P->>N: 새 위험만 고정 문구로 알림 (D12)
-        P->>C: ack(지문들)
-        C->>D: ack
-        D->>LG: pending → 알림 완료, 기준값 반영 (D24)
     end
+    P->>C: ack(이번 응답의 지문 전부 — 0건이면 빈 목록, Q67·Q70)
+    C->>D: ack
+    D->>LG: pending → 알림 완료, 기준값 반영, 검사 공백 표시 지움 (D24·Q67)
     P->>P: AppState 갱신 → 메뉴바 아이콘, 실패한 검사, 검사 공백 표시
     Note over LG: ack가 오지 않으면(앱이 중간에 죽음) 다음 검사에서 다시 보냄
 ```
@@ -939,7 +939,42 @@ sequenceDiagram
 - 완료 판정: 데몬 빌드 성공, `rg "func (collect|ack|installPatterns|markUserQuit)" haetaed` 정확히 4개
 
 ### WO-13: 앱 파이프라인 (`HaetaeAppCore`) — 스케줄러, 파이프라인, 규칙 판정, 기록 캐시
-- 상태: [ ] 대기
+- 상태: [x] 완료 (2026-11-27) — 두 단계(1단계 데이터·저장, 2단계 흐름)로 나눠 별도 에이전트 리뷰 2개(설계·보안)를 단계마다 받고 재리뷰까지 반영 — 마지막에 두 리뷰 모두 Medium 이상 없음·커밋 가능. `swift build` 경고 0, `swift test` 43개, 저장소 밖 임시 테스트 36개(`/private/tmp/haetae-wo13`), WO-12 임시 29개 통과, `xcodebuild` haetaed Debug·Haetae Debug·Release 성공. 사용자 결정: Q69·Q70·Q71 모두 1번. 앱 화면·알림 연결은 WO-14("WO-13에서 넘어온 것"). 임시 테스트 시나리오는 WO-19 8-2번에 옮겨 적었다.
+- 1단계 구현(2026-11-26, 데이터·저장 — 리뷰 대기):
+  1. `Protocols.swift`: `FindingSource`(`collect`, `ack` — 저장 뒤에만, 0건이면 빈 목록), `PatternInstaller`, `RiskJudge`(`judge([Finding]) async -> [Risk]`, 실패하지 않음 — LLM 실패는 구현이 규칙으로 넘김). 모두 `Sendable`(Q25).
+  2. `Risk`: 본문 1번 + `resolvedAt: Date?`(nil이면 아직 있음), `fingerprint`.
+  3. `RuleOnlyJudge`: 규칙 수준 그대로, `isRisk = level != .low`, 이유는 "규칙으로 판정했어요 (검사: <checkID>)"(탐지 내용은 넣지 않음), 시각 주입.
+  4. `RiskStore`(`@MainActor final class`): 지문을 키로 메모리에 들고, 바꾸는 함수(`save`, `markResolved`, `reconcile`, `purge`)는 메모리만 바꾸고 `commit() throws`가 한 번에 쓴다(상위 폴더 0700, 파일 0600, `.atomic`) — 한 번의 검사에서 파일을 여러 번 쓰지 않게, 실패하면 파이프라인이 ack하지 않게(D24). 읽기: 32MB 상한, `JSONWire`, `schemaVersion`, 지문 형식이 틀린 줄은 버림, 읽지 못하면 비우고 `loadFailed`(다음 응답 요약으로 되살아남). `save`는 `observedAt`이 미래이거나 30일보다 과거면 지금으로. `reconcile(notified:current:complete:)`(Q69): 요약에 있는데 기록에 없거나 해결로 바뀐 것은 되살리고(증거 빈칸, 규칙 판정, 알리지 않음), 아직 있는 것인데 요약·이번 findings 어디에도 없으면 해결 — 응답이 잘렸으면(`droppedFindings` > 0) 이 단계는 건너뛴다(잘려 못 온 pending을 해결로 보면 다음 응답에서 새 건으로 다시 알린다). `purge`: 해결된 지 30일 지난 것만 지우고 아직 있는 것은 지우지 않는다(데몬이 요약에서 빼면 해결로 감), 해결된 것은 5,000건 상한(오래 전에 해결된 것부터).
+  5. `AppSettings`(`@MainActor final class`, `UserDefaults` 주입): 주기는 읽을 때마다 5~60분 범위를 보고 벗어나면 15분, 쓰기는 범위 밖이면 거부. 일시정지는 최대 24시간, 지났거나 24시간보다 먼 값(밖에서 바꾼 것)은 일시정지가 아님. 약화(주기 늘림, 일시정지)는 `onWeakened`. 밖에서 `defaults write`로 바꾼 것은 콜백이 없다 — WO-40의 데몬 "정지 의심"이 맡는다.
+  6. `RiskLevel.rank`를 `HaetaeShared`(`package`)로 옮겼다(데몬·앱이 같은 순서). `HaetaeAppCore.swift` 자리 파일 삭제.
+  7. 확인: 저장소 밖 임시 테스트 `/private/tmp/haetae-wo13` 9개 통과(규칙 판정, 저장·권한 0600/0700, 깨진 파일·다른 버전, `observedAt` 맞추기, 되살리기·해결·잘린 응답·pending, 정리와 상한, 설정 범위·일시정지 만료·약화 콜백). `swift build` 경고 0, `swift test` 43개, `xcodebuild` haetaed·Haetae Debug 성공.
+- 1단계 리뷰 반영(2026-11-26, 설계·보안 별도 에이전트 — 설계 High 1·Medium 5, 보안 High 2·Medium 4, 겹친 것 있음). 원인은 하나 — 사용자가 바꿀 수 있는 `risks.json`을 너무 믿었다:
+  1. 새 건 판단을 파일 기록(`isActive`)으로 하면, 앱을 죽이고 `risks.json`에 앞으로 생길 지문을 "아직 있음"으로 심어 판정·알림 없이 ack하게 만들 수 있었다(보안 H1 — D18·T3의 지문 억제가 사용자 파일로 되돌아옴). 또 `commit` 실패 뒤 메모리가 앞서 있어 다음 검사가 알림 없이 ack했다(설계 H1). → 2단계 `ScanPipeline`은 "새 건"을 이 실행의 메모리(이 프로세스가 판정·알림을 마친 지문)로 정하고, 순서는 `save` → `notify` → `commit` → ack(커밋 실패면 ack 안 함, 다음 검사에서 다시 알리지 않고 다시 저장·ack). 다시 뜬 뒤 첫 응답의 pending은 모두 다시 판정·알림한다(고정 문구라 중복 1회는 감수). `RiskStore.isActive`는 없앴다.
+  2. 파일에서 읽은 줄은 형식을 본다(지문·검사 ID·제목·증거 상한, 이유 500자 `Risk.maxReasonChars`) — 증거 1,000만 자가 그대로 들어왔다(보안 L2). 미래로 적은 `resolvedAt`은 지금으로(30일 정리를 피하고 상한에서 진짜 기록을 밀어냈다, 보안 L1). 링크를 따라가지 않고(`O_NOFOLLOW`) 일반 파일만, 상한 + 1바이트까지만 읽는다 — 링크로 200MB 파일을 가리켜 메모리 217MB(보안 M1·설계 L5 실측).
+  3. 파일에서 읽고 아직 데몬 응답으로 확인 못 한 지문(`unverified`)은 응답이 잘렸어도 다음 맞추기에서 응답에 없으면 해결로 본다 — 검사 하나가 200건을 넘겨 응답이 늘 잘리면 심은 항목이 남았다(보안 L4). 실패한 검사(`failedChecks`)의 것은 해결로 보지 않는다(데몬과 같음, T12 — 보안 M2 실측). `partial`은 응답에 없어 막지 못한다(한계).
+  4. `commit`이 다시 읽을 수 있는 크기(32MB)를 넘으면 오래 전에 해결된 것부터 덜어 내고 그래도 넘치면 오래된 것부터 증거를 비운다(넘친 비율만큼 한 번에) — 41.5MB를 쓰고 다음 시작에 통째로 잃었다(설계 M2·보안 M3 실측).
+  5. `save`가 실제로 넣은 지문을 돌려준다 — 파이프라인은 이것만 ack(형식이 틀려 버린 것을 ack하면 저장 없이 알림 완료, 보안 의견).
+  6. `Risk.Judge` → `Risk.JudgedBy`(`RiskJudge`와 헷갈림), `case restored` 추가 — 되살린 것(증거 없음)은 WO-22가 다시 판정하지 않는다(증거 없이 낮추지 못하게, Q61과 같은 취지, 설계 M4).
+  7. `AppSettings`: 일시정지는 메모리에만(밖에서 하루마다 "지금 + 23시간"을 쓰면 끝없이 멈췄다, 보안 M4 실측 — 앱이 다시 뜨면 풀림). 끝나는 시각이 늦춰질 때만 약화로 알림(줄이기는 강화, 설계 L3). 주기는 `currentScanInterval()`로 읽을 때 밖에서 늘려 놓은 것을 알림(범위 안 3,600초면 데몬 정지 의심에도 안 걸렸다, 보안 L3). 주기·일시정지의 주인은 `AppSettings` 하나 — 2단계 `ScanScheduler`는 잠들 때마다 여기서 읽는다(설계 M5).
+  8. `activeRisks` 정렬에 지문을 마지막 기준으로(같은 수준·같은 판정 시각이면 검사마다 순서가 바뀌었다, 설계 L1). `observedAt` 맞추기는 없앴다(정리가 `resolvedAt`만 봄, 설계 L2). WO-14 0번의 격리 설명을 실측에 맞게 고쳤다(설계 M1).
+  9. 2단계에서 지킬 것: `RiskJudge` 결과를 파이프라인 한 곳에서 검증 — 지문으로 맞추고, 빠진 건은 `RuleOnlyJudge`로 채우고, `finding`은 파이프라인이 가진 원본으로 덮고, D10 상한(규칙 높음은 높음, LLM은 중간→낮음까지만)을 다시 적용(설계 M3). `commit` 실패는 상태로 올린다(보안 L5). 파일 내용(판정·증거)을 얼마나 믿을지는 Q71.
+  10. 확인: 임시 테스트 12개 통과(링크·폴더 거부, 형식 거르기·미래 해결 시각, 심은 항목이 잘린 응답에서도 해결로, 실패한 검사·pending 남김, 40MB를 상한 안으로 줄여 쓰고 다시 읽힘, 순서 고정, 일시정지 메모리·상한·줄이기, 밖에서 늘린 주기 알림).
+- Q71 반영(2026-11-27, 사용자 결정 1번): `NotifiedSummary.evidenceHash`(`Finding.evidenceHash` — 증거의 SHA-256 소문자 hex, `validate()`가 형식을 봄. 데몬은 알림 완료 Finding에서 계산해 싣는다, 2,000건에 약 160KB 늘어남). `lowercaseHex`를 `HaetaeShared`(`package`)로 옮겼다(지문·증거 해시·cdhash가 같은 표기). `RiskStore`: 파일에서 읽은 판정은 믿지 않는다 — 수준·위험 여부는 규칙 수준, 이유는 고정 문구, `llm`은 `rule`로(LLM이 낮춘 것은 앱이 다시 뜬 뒤 원래 수준으로 보이고 알림은 다시 안 함). 첫 맞추기에서 파일에서 읽은 것(`unverified`)이 요약과 다르면(검사·제목·규칙 수준, 증거가 있으면 해시) 요약으로 다시 만든다(`restored`, 증거 빈칸) — `reconcile`의 되살린 수에 셈. 이 실행에서 저장한 것은 다시 대조하지 않는다. 확인: 임시 테스트 15개(바꿔치기한 높음이 규칙 수준으로, 제목·증거 바꿔치기가 요약으로 다시 만들어짐, 그대로인 증거는 보임, 해시 형식) + WO-12 임시 29개 통과, `swift test` 43개, `xcodebuild` haetaed·Haetae Debug 성공.
+- 1단계 재리뷰(2026-11-27, 두 리뷰 모두 1단계 코드에 Medium 이상 없음 — 2단계 명세 High 1·문서 Medium 1) 반영: 본문 3·4·6번과 3장 클래스 다이어그램·7-1 10번을 반영 내용에 맞게 고쳤다(옛 규칙이 남아 그대로 구현하면 지난 H1이 되살아났다). 2단계 "새 건" 집합은 ack가 성공할 때까지만 기억한다(재리뷰 설계 H1 — 계속 기억하면 해결 뒤 다시 나타난 위험을 알리지 않는다, 원장 실측). WO-22 6번(다시 판정은 이 실행에서 규칙으로 판정했고 증거가 있는 것만, 설계 M1), WO-40(시작할 때 주기 기록). 코드: 파일에서 읽고 확인 못 한 것은 실패한 검사의 ID를 달아도 해결로(보안·설계 L1), `isVerified(_:)`(WO-14 "확인 전" 표시·WO-22 조건), 해결 기록을 줄일 때 확인 못 한 것부터(보안 L3), 증거는 낮은 수준·최근 판정부터 비움(보안 L2), 일시정지는 `ContinuousClock`으로 재고 `pauseRemaining` 추가(벽시계를 돌려 늘리지 못하게, 보안 L5), 주기 읽기를 `scanInterval`(보기용)과 `checkedScanInterval()`(스케줄러, 알림)로 나눔(보안 의견 — 화면에서 읽다 콜백이 돌지 않게). 넘긴 것: 응답 `schemaVersion`은 올리지 않았다(필수 필드가 늘어 옛 데몬 응답은 어차피 형식 오류 — 올려도 같은 "응답 형식 오류"로 끝나고 테스트 문자열 7곳만 바뀜). 확인: 임시 테스트 17개 통과.
+- 2단계 구현(2026-11-27, 흐름 — 리뷰 대기):
+  1. `ScanPipeline`(`@MainActor final class`, Q25): 본문 3번 순서 그대로. `awaitingAck: [지문: Risk]`(이 실행에서 알렸지만 ack가 성공하지 않은 것 — 새 건 판단은 이것으로만, ack 성공한 지문은 지움). `run()`은 돌고 있으면 그 결과를 기다린다(겹쳐 돌지 않음). `static verified(_:for:at:)`: 판정 결과를 지문으로 맞추고 빠지거나 겹치거나 `restored`인 건은 `RuleOnlyJudge.risk(for:at:)`로, `finding`은 원본, 수준은 규칙 수준을 넘지 못하고 규칙 높음은 높음·위험, 이유는 500자로 자름. 상태 콜백은 `Result<ScanReport, ScanFailure>` — `ScanReport`(시각, 데몬 빌드, 패턴 버전, 실패한 검사, 검사 공백, 못 보낸 건수, 알린 수, 되살린 수), `ScanFailure`(`collect`·`store`·`ack`, 원인 오류를 그대로 실음 — WO-14 0번). ack는 `save`가 돌려준 지문을 1,000개씩, 0건이면 빈 목록 한 번.
+  2. `ScanScheduler`(`@MainActor final class`): 주기·일시정지는 `AppSettings`에서 읽는다. `start()`(바로 한 번), `scanNow()`(쉬는 중에도 한 번), `setInterval`·`pause(for:)`·`resume()`(설정에 쓰고 바로 깨어남 — 재개는 바로 한 번 돎), `stop()`. 쉬지 않으면 마지막 검사부터 주기만큼(잠자기를 세는 `ContinuousClock` — 맥이 깨어나면 밀린 검사를 바로), 쉬면 일시정지가 끝나는 때까지 자고 끝나면 `onPauseChange` 뒤 한 번 돈다. 시계와 `sleep`을 주입받는다.
+  3. `ReconnectPolicy`(순수, 6-1번): `Attempt`(`reply(headerBuild:)`·`updating`·`rateLimited`·`daemonError`·`noReply(signature:)`) → `next(after:running:state:)`가 `Step`(`accept`·`relaunch`·`staleDaemon`·`retry(after:dropConnection:)`·`rethrow`·`giveUp(verificationFailed:)`). 지연 5·15·30초(4번 시도), `rateLimited`는 한 번만 20초 뒤 다시(그 칸을 씀 — 예전처럼 20초 + 다음 칸 5초를 겹쳐 기다리지 않음), `updating`은 연결을 놓고 다시. `shouldRelaunch(diskBuild:running:)`, `mayRelaunch(launchedByAgent:agentRegistered:relaunchCount:)`(3회). 앱 `DaemonClient.collect`는 XPC 호출과 결과 분류만 하고 이것을 따른다(Debug 머리 빌드는 시도 밖에서 읽어 형식 오류는 바로 올림 — 예전 동작), `AppState.relaunch`는 `mayRelaunch`를 쓴다.
+  4. 확인: 저장소 밖 임시 테스트 `/private/tmp/haetae-wo13` 33개 통과(1단계 17 + 2단계 16: 알림·전부 저장·전부 ack, 0건 빈 ack, ack 실패 뒤 다시 알리지 않고 다시 ack, ack 뒤 다시 나타나면 다시 알림, 파일에 심은 지문이 알림을 막지 못함, 쓰기 실패면 ack 안 하고 알림은 감, 판정 검증, 1,000개씩 ack, 겹친 실행 합치기, 요약으로 되살림 보고, 스케줄러 시작·주기·주기 단축·일시정지·지금 검사·자동 만료·재개, 재연결 규칙 4가지). `swift build` 경고 0, `swift test` 43개, WO-12 임시 29개, `xcodebuild` haetaed Debug·Haetae Debug·Release 성공.
+- 2단계 리뷰 반영(2026-11-27, 설계·보안 — High 없음, 두 리뷰가 같은 Medium 1, 설계 Medium 1, Low 5):
+  1. ack 응답만 잃으면(데몬은 반영, 앱은 타임아웃) 지문이 `awaitingAck`에 남아, 해결 뒤 다시 나타난 같은 위험을 알리지 않고 ack했다(두 리뷰 실측). `forgetDelivered`: 응답을 받을 때마다 알림 완료 요약·해결 목록에 있는 지문, 응답이 잘리지 않았으면 이번 탐지에 없는 지문을 잊는다(데몬은 pending을 매 응답 다시 보낸다).
+  2. 판정 검증이 LLM의 올림까지 막았다 — WO-22 4번("올리는 건 제한 없음")·WO-25와 반대(설계 M2 실측, 1단계 반영 9번에서 "규칙 수준을 넘지 못함"으로 잘못 적었다). 규칙 높음만 높음·위험으로 고정하고 나머지는 LLM 판정을 따른다. `judgedBy`가 `llm`이 아니면 규칙 판정으로 덮는다("규칙 판정"으로 표시된 채 수준이 바뀐 것, 설계 L5). WO-22 `VerdictPolicy`는 `verified` 안에서 불러 D10을 한 곳에 둔다.
+  3. `DaemonClient`: 두 번째 `rateLimited`가 `internalError`로 바뀌어 올라갔다 → `rateLimited` 그대로(두 리뷰 L1). `updating`은 마지막 시도여도 연결을 놓는다(설계 L2).
+  4. `ScanScheduler`: `start()` 전·`stop()` 뒤에는 설정을 바꿔도 돌지 않는다(설계 L3 — WO-14 "승인 뒤 start"). 일시정지 상태를 마지막으로 알린 값과 매번 견줘, 검사 도중 끝난 것도 알린다(두 리뷰 L4·L3). `AppSettings`의 바꾸는 함수와 `checkedScanInterval()`은 `package` — 앱은 스케줄러를 거쳐야 한다(보안 L2).
+  5. `ScanReport.notified` → `alerted`(`CollectResult.notified`와 헷갈림, 설계 의견). `FindingSource`·`RiskJudge` 주석에 "구현은 시간 상한을 둔다"(끝나지 않으면 파이프라인과 스케줄러가 함께 멈춘다 — WO-14 ack·WO-22 판정, 보안 의견).
+  6. WO-14에서 할 일(보안 의견): `AppState.connect()`가 지금도 `collect` 결과를 버리고 ack하지 않는다 — 연결 때의 수집도 파이프라인을 거치게 하고, `ScanFailure.collect`의 `needsRelaunch`·`verificationFailed`를 `connect`와 같은 규칙으로 처리한다.
+  7. 확인: 임시 테스트 36개 통과(ack 응답을 잃어도 다시 나타나면 다시 알림, LLM 올림 허용·높음 고정·규칙 표시 덮기, 시작 전 설정 변경 무시, 검사 도중 일시정지 끝남 알림 추가). `swift test` 43개, `xcodebuild` haetaed Debug·Haetae Debug·Release 성공.
+- 2단계 재리뷰(2026-11-27): 두 리뷰 모두 Medium 이상 없음·커밋 가능(지난 Medium 2·Low 5 해결, `forgetDelivered` 경계 — ack 실패·잘린 응답·요약 없음 — 실측, 잊는 쪽으로 틀려도 중복 알림일 뿐 빠지지 않음). 사소한 점 반영: 높음은 늘 위험(`isRisk`) — LLM이 올리면서 위험 아님이라고 해도. 남긴 것: 일시정지 연장은 상태가 그대로라 `onPauseChange`가 오지 않는다(끝 시각을 보여 주면 WO-14가 `pause` 뒤 직접 갱신), 데몬이 검증 실패로 낸 빈 응답을 받으면 기억을 전부 잊어 다음에 고정 문구 알림이 한 번 더 갈 수 있다.
 - 의존: WO-2
 - 충족: R6, R11, R13, R3
 - WO-12에서 넘어온 것: `CollectResult.notified`(알림 완료·미해결 요약 전부, Q53·Q64)로 패널을 다시 만든다. nil이면 "이번에는 안 보냄"이라 가진 것을 그대로 둔다(빈 배열과 다르다). Q67 1번: 앱은 `collect`마다 `ack`를 보낸다(새 건이 없으면 빈 목록, 저장·표시를 마친 뒤) — 데몬은 ack로만 검사 공백 표시를 지운다. 공백은 ack 전까지 매 응답에 실리며 점점 커진다(의도). 지금 `AppState.connect()`는 `collect` 결과에서 `daemonBuild`만 쓰고 `scanGap`·`resolved`를 버린다 — 연결·재연결(중단 처리기 포함) 때의 `collect` 결과도 파이프라인으로 넘긴다(WO-12 4차 재리뷰 보안 의견).
@@ -947,10 +982,10 @@ sequenceDiagram
 - 변경:
   1. `Risk: Codable` — `finding`, `level: RiskLevel`, `reason: String`, `judgedBy: .llm | .rule`, `judgedAt`, `isRisk: Bool`
   2. `RuleOnlyJudge`: `level = finding.ruleLevel`, `isRisk = level != .low`, `reason` = 고정 한국어 문구 + `checkID`
-  3. `ScanPipeline.run()`: `source.collect()` → `store.markResolved(result.resolved)` → 새 건이 있으면 `judgeProvider().judge` → `store.save` → 새 위험이 있으면 `notify(개수, 최고 수준)` → `source.ack(새 건의 지문)`(`HaetaeLimits.maxAckFingerprints`개씩 나눠 보냄) → 상태 콜백(`lastScanAt`, `failedChecks`, `scanGap`, `patternVersion`). 오류는 상태로 올리고 다음 주기에 다시 시도한다. 중복 판단은 `Finding ==`가 아니라 `fingerprint`로 한다(`observedAt`은 재전송 때마다 달라진다). `observedAt`이 미래이거나 터무니없이 과거면 저장할 때 현재 시각으로 맞춘다(30일 정리가 어긋나지 않게).
-  4. `ScanScheduler`: `interval`(기본 900초, 하한 300초, 상한 3,600초를 벗어나면 기본값으로), `pause(until:)`(최대 24시간, 지나면 자동 재개), `scanNow()`, 앱 시작 직후 1회 실행. 타이머는 `Task.sleep` 기반이고 `Clock`을 주입받아 테스트할 수 있다.
+  3. `ScanPipeline.run()`(1단계 리뷰·재리뷰 반영 뒤의 명세 — 이 순서를 바꾸지 않는다): ① `source.collect()` → ② `store.markResolved(result.resolved)` → ③ `result.notified`가 있으면 `store.reconcile(notified:current:failedChecks:complete:)`(Q69·Q71 — `current` = 이번 findings 지문, `complete` = `droppedFindings`가 0) → ④ 새 건 = 이번 findings 중 "이 실행에서 알렸지만 아직 ack가 성공하지 않은 지문"(메모리 집합)에 없는 것. 파일 기록(`risks.json`)은 보지 않는다(같은 사용자가 지문을 심어 알림 없이 ack하게 만들 수 있었다 — 1단계 보안 H1). ack가 성공한 지문은 집합에서 지운다 — 계속 기억하면 해결된 뒤 같은 지문이 다시 나타났을 때 알리지 않는다(재리뷰 설계 H1). 앱이 다시 뜬 뒤 첫 응답의 pending은 모두 새 건이다(중복 알림 1회는 감수) → ⑤ 새 건이 있으면 `judgeProvider().judge` → 결과를 파이프라인에서 검증: 지문으로 맞추고, 빠진 건은 `RuleOnlyJudge`로 채우고, `finding`은 응답의 원본으로 덮고, 수준은 규칙 수준을 넘지 못하며 규칙 높음은 높음·`isRisk` 그대로(LLM은 중간→낮음까지만, D10), 이유는 `Risk.maxReasonChars`로 자른다(넘치면 `save`가 버려 영영 ack되지 않는다) → ⑥ 이번 findings 전부를 `store.save`(이미 알린 것은 그 판정에 응답의 `finding`을 덮어서 — 앱과 데몬의 증거가 같아야 재시작 뒤 해시가 맞는다) → ⑦ 새 위험(`isRisk`)이 있으면 `notify(개수, 최고 수준)` → ⑧ `store.purge()` → `store.commit()` — 실패하면 ack하지 않고 상태로 올린다(D24, 알림은 이미 갔다) → ⑨ `source.ack(save가 돌려준 지문 전부)`(Q70 — 0건이면 빈 목록으로라도 보낸다, Q67. `HaetaeLimits.maxAckFingerprints`개씩 나눠 보냄) → 성공한 지문을 ④의 집합에서 지움 → ⑩ 상태 콜백(`lastScanAt`, `failedChecks`, `scanGap`, `patternVersion`, `droppedFindings`, 되살린 수). 오류는 고치지 않고 그대로 상태로 올리고(WO-14 0번) 다음 주기에 다시 시도한다. 중복 판단은 `Finding ==`가 아니라 `fingerprint`로 한다(`observedAt`은 재전송 때마다 달라진다). 30일 정리는 `resolvedAt`만 보므로 `observedAt`은 맞추지 않는다. 한계: 다시 뜬 뒤 알렸지만 ack 못 한 pending이 잘려 안 오면 그 응답에서는 해결로 보이고, 다음 응답에 오면 다시 알린다(심은 항목을 막으려고 받아들인 대가 — 재리뷰 설계 L2).
+  4. `ScanScheduler`: 주기·일시정지의 주인은 `AppSettings`다(1단계 리뷰 설계 M5) — 스케줄러는 잠들 때마다 `settings.checkedScanInterval()`과 `pauseRemaining`을 읽는다. 바꾸는 쪽(UI, WO-14)은 `scheduler.setInterval`·`pause(for:)`·`resume()`을 부르고, 스케줄러가 `AppSettings`에 쓴 뒤 스스로 깨어난다 — "잠들 때마다 읽기"만으로는 일시정지 끝까지(최대 24시간) 자는 동안 재개·주기 단축을 모른다(재리뷰 설계 M2·보안 L6). 일시정지가 끝나는 때에도 깨어나 상태 콜백을 부른다(아이콘이 제때 돌아오게). `scanNow()`(일시정지 중에도 한 번 돈다), 앱 시작 직후 1회 실행. 타이머는 `Task.sleep` 기반이고 시계를 주입받아 테스트할 수 있다. `ScanPipeline.run()`이 돌고 있으면 새로 돌리지 않고 그 결과를 기다린다.
   5. `RiskStore`: `~/Library/Application Support/Haetae/risks.json`(파일 0600, 상위 폴더 0700, 원자적 쓰기, `schemaVersion`), `activeRisks`, `markResolved`, `purge(30일)`. 경로는 주입 가능하다.
-  6. `AppSettings`: `UserDefaults`의 값을 읽을 때 범위를 검증한다(D28). 약화 방향 변경(주기 증가, 일시정지)은 콜백으로 알린다(Phase 5 WO-40에서 앱 기록에 연결).
+  6. `AppSettings`: 주기는 `UserDefaults`에 두고 읽을 때 범위를 검증한다(D28). 일시정지는 메모리에만(앱이 다시 뜨면 풀림, 흐르는 시간으로 잼). 약화 방향 변경(주기 증가, 일시정지 연장)은 콜백으로 알린다(Phase 5 WO-40에서 앱 기록에 연결). 자세한 것은 "1단계 구현" 5번·"1단계 리뷰 반영" 7번.
   6-1. `ReconnectPolicy`(WO-5 리뷰): 지금 `Haetae/DaemonClient.swift`·`AppState.swift`에 있는 판단 — 디스크 빌드가 더 높으면 재실행, Debug 헤더 빌드 비교, 재시도 뒤 검증 실패 판정, 재실행 3회 제한과 agent 조건 — 을 순수 함수로 옮긴다(입력: 디스크·실행·헤더 빌드, 오류 종류, 시도·재실행 횟수, agent 여부 / 출력: 재실행·재시도·연결됨·검증 실패·오류). Release 동작은 유료 계정이 있어야 실측할 수 있어서(P6), 그 전에 `swift test`로 고정한다(WO-19에 경우별 테스트). `ScanPipeline.run()`은 겹쳐 돌지 않게 한다(XPC continuation은 Task 취소를 무시한다).
   7. 격리(Q25): `ScanScheduler`와 `ScanPipeline`은 `@MainActor public final class`. `notify`·상태 콜백·`judgeProvider`는 `@escaping @MainActor` 클로저. `FindingSource`·`PatternInstaller`·`RiskJudge` 프로토콜은 `Sendable`을 요구한다.
   8. `HaetaeKit/Sources/HaetaeAppCore/HaetaeAppCore.swift`(WO-1 빌드용 파일) 삭제
@@ -962,8 +997,9 @@ sequenceDiagram
 - 의존: WO-5, WO-13, WO-12
 - 충족: R3, R4, R5, R6, R14
 - 대상: `Haetae/` — `AppState.swift`, `PanelView.swift`, `SettingsView.swift`, `Notifier.swift`(신규), `HaetaeApp.swift`, `DaemonClient.swift`(`FindingSource`·`PatternInstaller` 채택)
+- WO-13에서 넘어온 것: 연결 때(`AppState.connect`)의 `collect`도 `ScanPipeline`을 거쳐 저장·ack한다(지금은 결과를 버려 검사 공백·해결을 잃는다). `ScanFailure.collect`의 `needsRelaunch`·`verificationFailed`·`staleDaemon`을 `connect`와 같은 규칙으로 상태에 올린다. `DaemonClient.ack`는 시간 상한을 둔다(데몬 ack는 다른 사용자 검사를 기다릴 수 있다 — 끝나지 않으면 스케줄러가 멈춘다). 설정 화면은 `ScanScheduler`(`setInterval`·`pause`·`resume`)를 부른다. 패널의 "확인 전" 표시는 `RiskStore.isVerified`, 기록 잃음은 `loadFailed`, 되살린 수는 `ScanReport.restored`.
 - 변경:
-  0. WO-5에서 넘어온 것: `DaemonClient`는 `@MainActor`를 명시한 클래스다 — `@MainActor`를 명시해 두었으므로 `FindingSource`·`PatternInstaller`를 채택해도 격리가 유지된다(명시하지 않은 클래스가 선언부에서 `Sendable` 프로토콜을 채택하면 MainActor 추론이 빠진다). 연결 상태(`daemonStatus`)의 주인은 `AppState`다 — 파이프라인의 상태 콜백은 오류를 문자열로 바꾸지 않고 그대로 넘기고, `AppState`가 한 함수에서 상태로 바꾼다. `DaemonStatus.error(String)`은 원인별 case로 나눈다(`rolledBack`(높음)과 `rateLimited`(무해)가 같은 문구로 보이지 않게, 2번의 아이콘 구분과 WO-43의 "업데이트 필요"를 붙일 수 있게). 4MB까지 오는 응답의 `decodeValidated`는 메인 액터 밖(`@concurrent`)에서 한다. 시작 순서: 승인 확인이 끝난 뒤 `scheduler.start()`(첫 실행이 곧 연결 확인), `PatternUpdater`는 `.connected` 뒤. 메뉴바 아이콘은 `MenuBarExtra { … } label: { Image(systemName:) }`로 바꾸되 템플릿 이미지라 빨강이 안 보일 수 있다(안 되면 `NSImage`, `isTemplate = false`).
+  0. WO-5에서 넘어온 것: `DaemonClient`는 `@MainActor`를 명시한 클래스지만, `FindingSource`·`PatternInstaller`가 `NonisolatedNonsendingByDefault`로 컴파일된 다른 모듈(`HaetaeAppCore`)에 있어 채택하면 구현 메서드가 nonisolated로 잡힌다(선언부·extension 모두 — WO-13 설계 리뷰 실측, MainActor 상태를 쓰면 컴파일 오류). 구현 메서드마다 `@MainActor`를 직접 붙인다(채택도, MainActor 파이프라인의 호출도 된다). 연결 상태(`daemonStatus`)의 주인은 `AppState`다 — 파이프라인의 상태 콜백은 오류를 문자열로 바꾸지 않고 그대로 넘기고, `AppState`가 한 함수에서 상태로 바꾼다. `DaemonStatus.error(String)`은 원인별 case로 나눈다(`rolledBack`(높음)과 `rateLimited`(무해)가 같은 문구로 보이지 않게, 2번의 아이콘 구분과 WO-43의 "업데이트 필요"를 붙일 수 있게). 4MB까지 오는 응답의 `decodeValidated`는 메인 액터 밖(`@concurrent`)에서 한다. 시작 순서: 승인 확인이 끝난 뒤 `scheduler.start()`(첫 실행이 곧 연결 확인), `PatternUpdater`는 `.connected` 뒤. 메뉴바 아이콘은 `MenuBarExtra { … } label: { Image(systemName:) }`로 바꾸되 템플릿 이미지라 빨강이 안 보일 수 있다(안 되면 `NSImage`, `isTemplate = false`).
   1. `HaetaeApp`에서 조립: `DaemonClient` → `ScanPipeline(source:, judgeProvider: { RuleOnlyJudge() }, store:, notify:)` → `ScanScheduler`
   2. 메뉴바 아이콘: 정상 `shield`, 위험 있음 `exclamationmark.shield.fill`(빨강), 데몬 검증 실패·알림 꺼짐·일시정지는 각각 구분되는 아이콘(`shield.slash` 등)
   3. 패널(R4): ① 데몬 상태 ② 마지막·다음 검사 시각 ③ 최근 위험 목록(수준, 제목, 이유, `Text(verbatim:)`) ④ 모델 상태(Phase 3 전에는 "규칙 판정") ⑥ 패턴 버전 ⑤ "지금 검사", "일시정지(1시간)", "종료". 실패한 검사와 검사 공백도 표시. `droppedFindings`가 0보다 크면 "N건은 표시하지 못했어요"를 높음으로 표시.
@@ -1034,8 +1070,9 @@ sequenceDiagram
   7. WO-15~18 파서와 규칙: 픽스처 출력으로 기대 Finding이 나오는지
   8. `CollectCoordinator`: 되돌리기 방지(`highestBuild`가 `nil`이면 낮은 빌드여도 동작, 값이 있으면 더 낮은 빌드는 거부), 20초 빈도 제한과 결과 공유, ack 개수 상한 1,000, `maxReplyBytes` 초과 시 낮은 수준부터 잘라 "높음"이 남는지, 연결 종료 기록 3종
   8-1. WO-12 리뷰에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `CollectCoordinator.fit`(수준 → 먼저 잡힌 것 순서, 쏟아내기 중 오래된 진짜 탐지가 맨 앞, 요약을 탐지보다 먼저 싣고 최대 크기 2,000건도 들어감, 요약에서 이번 findings 지문 빼기, 4바이트 글자 2,000자 × 1,000건 ≈ 8MB가 4MB 안으로, 검사별로 자른 수에 더하기, 개수 상한 1,000), 같은 사용자 동시 `collect` 한 번 실행·20초 안 재요청 `rateLimited`, ack 형식 오류 `invalidInput`·ack 뒤 요약이 돌아옴, 검사 공백은 ack로만 지워짐(Q67)·첫 ack 전에도 잼, 검증 실패 연결·비정상 종료 묶기(uid별, 1분)와 `prepareForExit`, 되돌리기 거부와 기록 1번, 자기 무결성 Finding·기록, 첫 `collect` 전 정리·하루 안에는 다시 안 함, `CommandRunner` 대기 취소 3가지, `SelfIdentity` 오류 경로, `BundleIntegrity`(임시 폴더 소유·서명 둘 다, 없는 경로, Calculator.app 통과, 틀린 요구사항), `DaemonLifecycleState`(유휴 종료, 작업 중 앱이 죽음, 새 빌드는 연결 무시·응답 여유, 업데이트 중 끊김·`updating` 되풀이로 붙잡지 못함, 묵은 유휴 확인이 되살아나지 않음).
+  8-2. WO-13 리뷰에서 저장소 밖 임시 테스트로 확인한 것(옮겨 온다): `RiskStore`(저장·권한 0600/0700, 깨진 파일·다른 버전·링크·폴더 거부, 형식 거르기·미래 해결 시각, 파일 판정 불신(바꿔치기한 높음이 규칙 수준으로), 요약 대조(제목·증거 바꿔치기가 요약으로 다시 만들어짐, 그대로인 증거는 보임), 되살리기·해결·잘린 응답·pending·실패한 검사(확인 못 한 것은 해결), 40MB를 상한 안으로 줄여 쓰고 다시 읽힘·낮은 수준부터 증거 비움, 순서 고정, 정리와 상한), `AppSettings`(주기 범위·밖에서 늘린 것 알림, 일시정지 메모리·24시간·벽시계 무관·줄이기는 약화 아님), `ScanPipeline`(알림·전부 저장·전부 ack, 0건 빈 ack, ack 실패 뒤 다시 알리지 않음, ack 뒤·ack 응답을 잃은 뒤 다시 나타나면 다시 알림, 파일에 심은 지문이 알림을 막지 못함, 쓰기 실패면 ack 안 하고 알림은 감, 판정 검증(올림 허용·높음 고정·규칙 표시 덮기·빠진 건 채우기·이유 자르기), 1,000개씩 ack, 겹친 실행 합치기, 되살림 보고), `ScanScheduler`(시작·주기·주기 단축·일시정지·지금 검사·자동 만료·재개, 시작 전 변경 무시, 검사 도중 일시정지 끝남 알림), `ReconnectPolicy`(재시도·포기·`rateLimited` 한 번·`updating`·Debug 머리 빌드·재실행 조건).
   9. `ScanPipeline`: 가짜 `FindingSource`·`RiskJudge`로 ack 순서(저장·알림 다음에 ack), 새 위험만 알림, 오류 뒤 다음 주기에 회복
-  10. `ScanScheduler`: 주기 상·하한, 일시정지 자동 만료(가짜 Clock)
+  10. `ScanScheduler`·`AppSettings`: 주기 상·하한, 일시정지 자동 만료·메모리에만·벽시계 무관, 바꾸면 스케줄러가 깨어남(가짜 Clock)
   11. `RiskStore`: 파일 권한 0600, 30일 정리
 - 금지: 구현 코드 수정 금지
 - 완료 판정: `swift test` 통과
@@ -1074,7 +1111,7 @@ sequenceDiagram
   3. `LLMAnalyzer: RiskJudge`: 검사 때 `ModelManager.verify` → 로컬 디렉터리에서 로드 → `MLXGuidedGeneration`으로 위 JSON 스키마를 강제 생성 → 끝나면 컨테이너 해제(D11). Qwen 계열은 `enable_thinking: false`. 상한: 1회 최대 50건(넘으면 나머지는 `RuleOnlyJudge`), 전체 120초, 건당 출력 400토큰. 파싱·스키마 실패나 시간 초과면 그 건은 `RuleOnlyJudge`.
   4. `VerdictPolicy.apply(rule:llm:) -> Risk`: 규칙 "높음"이면 결과는 무조건 높음 + 위험. LLM은 "중간 → 낮음"까지만 낮출 수 있고, 낮춘 건은 `isRisk = false`로 하되 기록에 "LLM이 낮춤"으로 남겨 패널에 보인다. 올리는 건 제한 없음.
   5. 추론은 메인 액터 밖에서 한다(8장, `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`). `nonisolated`만으로는 부족하다 — `@concurrent` 또는 별도 actor를 쓴다.
-  6. 조립: `judgeProvider = { modelManager.isReady ? llmAnalyzer : RuleOnlyJudge() }`. 규칙으로 판정했던 활성 위험은 모델이 준비되면 다음 검사 때 1회 다시 판정한다(D19).
+  6. 조립: `judgeProvider = { modelManager.isReady ? llmAnalyzer : RuleOnlyJudge() }`. 규칙으로 판정했던 활성 위험은 모델이 준비되면 다음 검사 때 1회 다시 판정한다(D19) — 이 실행에서 규칙으로 판정했고 증거가 있는 것만(`judgedBy == .rule`이고 `RiskStore.isVerified`, 증거가 빈칸이 아닌 것). 되살린 것(`restored`)과 파일에서 읽고 아직 확인 못 한 것은 다시 판정하지 않는다 — 증거가 없거나 공격자 글일 수 있어 LLM이 제목만 보고 낮출 수 있다(Q61과 같은 취지, WO-13 재리뷰 설계 M1·보안 의견). 파일에서 읽은 `llm` 판정은 Q71대로 규칙으로 돌아오므로, 앱을 켤 때마다 모두 다시 판정하지 않게 이 조건을 지킨다.
 - 금지: LLM 출력을 알림에 넣기 금지, 마크다운 렌더링 금지
 - 완료 판정: 앱 빌드 성공. 패키지 버전이 `exactVersion: 3.33.0`으로 고정됐는지 `Package.resolved`에서 확인.
 
@@ -1188,6 +1225,7 @@ sequenceDiagram
 ### WO-40: 자기 보호 완성 (D28)
 - 상태: [ ] 대기 · 의존: WO-12, WO-14 · 충족: R13, R17
 - WO-12에서 넘어온 것: 검사 공백 표시는 ack가 지운다(Q67) — `collect` 응답을 만든 뒤 ack 전에 새로 생긴 표시(정지 의심)도 그 ack가 지운다. 정지 의심 표시를 달 때 이 순서를 다시 본다(표시 시각이 마지막 응답보다 뒤면 지우지 않기 등). 사용자별 연결 생존 정보가 `ListenerDelegate`에 없으니 coordinator에 "유효한 호출 시각"을 받는 함수를 두는 쪽으로(타이머를 delegate에 넣지 않음).
+- WO-13에서 넘어온 것: `AppSettings.onWeakened`(주기 늘림·일시정지 연장)를 앱 기록에 잇는다. 앱이 뜨기 전에 `defaults write`로 주기를 늘려 두면 알 수 없다 — 시작할 때의 주기를 기록에 남긴다(WO-13 재리뷰 설계 L4·보안 L5).
 - 대상: `Haetae/`, `haetaed/CollectService.swift`, `HaetaeKit/Sources/HaetaeChecks/Engine/CollectCoordinator.swift`, `HaetaeKit/Sources/HaetaeAppCore/AppSettings.swift`
 - 변경:
   1. 데몬: 연결은 살아 있는데 `collect`가 주기 상한(60분)×2를 넘게 없으면 "정지 의심"으로 기록한다. 이 시간은 잠자기 동안 멈추는 시계(`SuspendingClock`)로 잰다(Q31 — 밤새 잠자기가 정지로 잡히지 않게). 설정값과 상관없이 판단하고, 다음 `collect`의 `scanGap`에 반영한다. 계산은 `CollectCoordinator`에 둔다(Q23, WO-42가 `swift test`로 검증).
@@ -1567,6 +1605,9 @@ sequenceDiagram
 | Q66 | 서명 검증에 걸린 연결 기록을 묶는 방법 (D28, K 검사) | 누구나 반복할 수 있어 건마다 쓰면 기록이 불어난다. 1) 1분에 한 줄, 그 사이 건수를 합쳐 적음 — Claude 추천 / 2) 1·2·4·8…번째만 적음(지금 로그 방식, 정확한 수는 안 남음) | 1번 (2026-11-26) — WO-12 3번 반영 |
 | Q67 | 검사 공백(`scanGap`) 표시를 언제 지울지 (WO-12 1단계 보안 리뷰 M3, 설계 L1 — 실측) | 지금은 `collect`가 응답을 만들 때 지운다. 악성코드가 앱이 응답을 받기 직전마다 앱을 죽이면, 몇 시간 감시를 막아도 사용자는 마지막 몇십 초 공백만 본다(1시간 공백 → 다음 응답 `scanGap=30`). 1) 앱이 `ack`할 때 지우고 공백 시작점은 앱이 마지막으로 받은 `collect`로 고정 — 앱은 탐지 0건이어도 `collect`마다 빈 `ack`를 보낸다(WO-13 계약 한 줄), Claude 추천 / 2) 응답 인코딩이 성공한 뒤에 지움 — 앱 계약 그대로, 위 틈은 남음 | 1번 (2026-11-26) — WO-12에서 구현(`FindingLedger.acknowledge`가 지움), WO-13 앱은 `collect`마다 ack |
 | Q68 | `highest-build`를 읽지 못하거나 숫자가 아닐 때 (D20, WO-12 2단계 리뷰) | 그 파일은 root만 바꿀 수 있다. 1) 이번 실행은 되돌리기 방지 없이 계속(fail-open)하고 fault 로그, 파일은 덮어쓰지 않음 — 데몬이 영영 서지 못하는 일이 없음(D21과 같은 취지), Claude 추천 / 2) 모든 요청 거부(fail-closed) — 파일 권한이 꼬이면 sudo로 고칠 때까지 Haetae가 멈춤 | 1번 (2026-11-26) — WO-12 `HighestBuild.update` 그대로 |
+| Q69 | `risks.json`이 지워졌을 때 `notified` 요약으로 패널을 어떻게 다시 만들지 (WO-13, Q53) | 요약에는 evidence가 없다. 1) 요약에 있고 앱 기록에 없는 것은 "규칙 판정"으로 되살리고(이유 "기록이 지워져 요약으로 되살림", 증거 빈칸, 알리지 않음), 앱 기록에서 아직 있는 것인데 요약·이번 findings 어디에도 없는 것은 해결로 표시 — 데몬과 늘 맞춰짐, Claude 추천 / 2) 되살리기만 하고 해결 표시는 데몬 `resolved`만 따름 — 오래된 위험이 30일 남을 수 있음 | 1번 (2026-11-26) — WO-13 3번 반영 |
+| Q70 | `ack`에 어떤 지문을 보낼지 (WO-13) | 문서는 "새 건의 지문"만. 1) 이번 응답 findings의 지문 전부를 저장한 뒤 보냄(0건이면 빈 목록 — Q67), Claude 추천 / 2) 새 건만 — 저장 뒤 ack 전에 앱이 죽으면 그 건은 다음부터 "이미 본 건"이라 영영 ack되지 않아 데몬 pending에 남고 기준값이 확정되지 않음 | 1번 (2026-11-26) — WO-13 3번·3장 시퀀스 반영 |
+| Q71 | `risks.json`에서 읽은 판정·증거를 얼마나 믿을지 (WO-13 1단계 보안 H2 — 실측) | 같은 사용자 권한으로 앱을 죽이고 파일을 바꾸면, 이미 알린 높음을 "낮음·위험 아님"과 공격자 문구("안전한 항목이에요…")로 바꿀 수 있었고 요약 맞추기로 고쳐지지 않았다. 알림 판단은 1번 수정(메모리)으로 막았고, 남은 것은 패널 표시다. 1) 파일에서 읽은 것은 판정을 믿지 않음 — 수준·위험 여부는 규칙 수준으로 되돌리고(LLM이 낮춘 것은 앱이 다시 뜬 뒤 원래 수준으로 보임, 알림은 다시 안 함), 제목·검사·규칙 수준은 요약과 다르면 요약으로 다시 만들고, 증거는 요약의 증거 해시와 맞을 때만 보여 줌(요약에 해시 필드 추가 — XPC 계약 한 필드), Claude 추천 / 2) 1번에서 증거 해시는 빼고 증거 바꿔치기는 한계로 적음(계약 그대로) / 3) 지금처럼 파일을 믿고 한계로 적음 | 1번 (2026-11-27) — WO-13 1단계 반영(`RiskStore`), 요약에 `evidenceHash`(WO-12 계약 한 필드) |
 
 ## 10. 작업 로그 (append-only)
 
@@ -1864,3 +1905,9 @@ sequenceDiagram
 - 알아낸 것: 클라이언트가 서명 요구사항으로 응답을 거부해도 서버 메서드는 끝까지 돈다(업데이트 때 옛 데몬이 새 앱의 `collect`를 돌리고 결과가 버려짐 → 새 빌드면 `updating`). mach 서비스가 `exit`하면 클라이언트 연결은 무효화가 아니라 중단만 되고, 같은 연결로 다시 보내면 launchd가 새 프로세스를 띄운다(→ 앱 `interruptionHandler`). 종료 확인의 "마지막에 건 것만 유효" 규칙은 누구나 되풀이할 수 있는 사건(끊김, `updating` 응답)에서 확인을 걸면 데몬을 붙잡아 둘 수 있다 — 세대는 진짜 작업이 끝날 때만 올린다. `SecCodeCopySigningInformation(flags: [])`의 `kSecCodeInfoPList`로 서명에 묶인 내장 plist를 읽을 수 있다. `Dictionary.values` 순서에 맡긴 자르기는 실행마다 달라져 진짜 탐지가 여러 번 밀린다(8번 중 3번 6회차 내내).
 - 바뀐 결정: Q63~Q68 추가·결정(모두 1번), WO-12 본문(응답 순서·요약 먼저·resolved 다 싣기·새 빌드면 아무것도 세지 않음), 8장 `HaetaeShared` 규칙(신원·서명 확인 포함), K 행·WO-34(자기 무결성은 WO-12, 검증 실패는 `count` 합), WO-13(`collect`마다 ack, `notified` nil 처리, `connect()`가 결과를 버림), WO-19 8-1.
 - 남은 것: WO-13부터. 7-1 P2 실제 데몬 확인(별도 에이전트, root 소유 사본), Q49(WO-45 전), Q45(WO-16 전), Q40(WO-26 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행). 넘긴 의견: 원장의 알림 완료 건이 evidence까지 들고 있어 사용자 4명이면 64MB 상한에서 서로 밀어냄(요약만 보관은 `state.json` 형식 변경), 데몬이 끝나는 순간 같은 연결로 보낸 호출의 몇 ms 틈.
+
+### 2026-11-26~27 — Claude (WO-13 구현·리뷰·완료)
+- 한 일: WO-13을 두 단계로 구현. 1단계 — `Protocols`(`FindingSource`·`PatternInstaller`·`RiskJudge`), `Risk`(`JudgedBy` `llm`·`rule`·`restored`), `RuleOnlyJudge`, `RiskStore`(파일 불신·요약 대조·크기 맞춰 쓰기·안전한 읽기), `AppSettings`(주기는 범위 검증, 일시정지는 메모리에만). 2단계 — `ScanPipeline`(새 건은 이 실행의 메모리, 저장 → 알림 → commit → ack, 판정 검증), `ScanScheduler`(설정을 바꾸면 깨어남), `ReconnectPolicy`(앱 `DaemonClient`·`AppState`가 씀). 데몬 쪽은 요약에 `evidenceHash`(Q71). 별도 에이전트 리뷰 2개(설계·보안)를 1단계·재리뷰·2단계·재리뷰까지 반영.
+- 알아낸 것: 사용자가 바꿀 수 있는 파일(`risks.json`)로 "새 건"을 판단하면 지문을 심어 알림 없이 ack하게 만들 수 있다 — 알림 판단은 이 실행의 메모리로만, 그 메모리는 데몬이 받았다고 확인되면(ack 성공·요약·해결·잘리지 않은 응답에서 빠짐) 잊어야 해결 뒤 다시 나타난 위험을 다시 알린다. `NonisolatedNonsendingByDefault`로 컴파일된 다른 모듈의 `Sendable` 프로토콜을 `@MainActor` 클래스가 채택하면 구현 메서드가 nonisolated로 잡힌다(메서드마다 `@MainActor`). `O_NOFOLLOW`·`fstat`·상한 + 1바이트 읽기로 링크·바꿔치기 크기 공격을 막는다. `@testable import`로 다른 패키지의 `package` 선언도 시험할 수 있다.
+- 바뀐 결정: Q69·Q70·Q71 추가·결정(모두 1번), WO-13 본문 3·4·6번과 3장 시퀀스·클래스 다이어그램, WO-14 0번(격리 설명)·"WO-13에서 넘어온 것", WO-22 6번(다시 판정 조건)·`VerdictPolicy`는 `verified` 안에서, WO-40(시작할 때 주기 기록·`onWeakened` 연결), WO-19 8-2, `NotifiedSummary.evidenceHash`(WO-12 계약 한 필드).
+- 남은 것: WO-14부터. 7-1 P2 실제 데몬 확인(별도 에이전트, root 소유 사본), Q49(WO-45 전), Q45(WO-16 전), Q40(WO-26 전), Phase 1 사용자 확인 2개(7-2 R16, 로그아웃 뒤 자동 실행).
